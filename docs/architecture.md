@@ -1,12 +1,48 @@
 # FluxRipper System Architecture
 
-*Updated: 2025-12-03 21:10*
+*Updated: 2025-12-03 23:50*
 
 ## Overview
 
 FluxRipper is an FPGA-based System-on-Chip implementing an enhanced Intel 82077AA Floppy Disk Controller with diagnostic capabilities. The design targets the **AMD Spartan UltraScale+ SCU35 Evaluation Kit** with a MicroBlaze V (RISC-V) soft core. The HDL design is derived from the CAPSImg library's FDC emulator.
 
 **Dual Interface Architecture**: FluxRipper supports two independent Shugart interfaces for 4 concurrent drives, enabling parallel flux capture and disk-to-disk copy operations.
+
+## FluxRipper Universal Card Architecture
+
+The Universal card design provides multiple host interfaces on a single PCB:
+
+### Host Interfaces
+| Interface | Edge/Connector | Protocol | Use Case |
+|-----------|----------------|----------|----------|
+| **ISA** | Edge connector | ISA bus (3F0-3F7, DMA, IRQ) | Retro PC restoration |
+| **PCIe** | Edge connector | PCIe x1 BAR0, MSI-X | Modern PC integration |
+| **USB-C** | USB-C receptacle | FT232H (CDC/Bulk) | Cross-platform tool |
+
+### Universal Card Peripherals
+| Component | Interface | Purpose |
+|-----------|-----------|---------|
+| **SPI OLED** | SSD1306 128×64 | Status display, menu UI |
+| **Rotary Encoder** | EC11 quadrature | Menu navigation + select |
+| **MicroSD Slot** | SPI mode | Standalone disk image storage |
+| **RTC** | PCF8563 I2C | FAT timestamps + ISA RTC (0x70-0x71) |
+| **Power Monitors** | INA3221 I2C (×3) | Per-drive voltage/current sensing |
+
+### ISA Plug and Play Support
+FluxRipper implements full ISA PnP for auto-configuration:
+
+| Logical Device | Default I/O | Default IRQ | Default DMA |
+|----------------|-------------|-------------|-------------|
+| FDC A (Primary) | 0x3F0-0x3F7 | IRQ 6 | DMA 2 |
+| FDC B (Secondary) | 0x370-0x377 | IRQ 6 | DMA 1 |
+| FluxRipper Extensions | 0x3E8-0x3EF | - | - |
+| Real-Time Clock | 0x70-0x71 | IRQ 8 | - |
+
+### ISA Real-Time Clock
+The onboard RTC is exposed as an AT-compatible MC146818 RTC for legacy systems:
+- **Ports:** 0x70 (address), 0x71 (data)
+- **Use case:** Add RTC to XT clones without a built-in clock
+- **Features:** BCD time/date, century register (0x32), battery backup
 
 ## System Block Diagram (SCU35 SoC)
 

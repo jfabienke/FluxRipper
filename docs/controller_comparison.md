@@ -2,26 +2,30 @@
 
 *FluxRipper vs KryoFlux vs GreaseWeazle vs SuperCard Pro*
 
-*Updated: 2025-12-03 17:15*
+*Updated: 2025-12-03 23:58*
 
 ---
 
 ## Executive Summary
 
-| Feature | FluxRipper | KryoFlux | GreaseWeazle | SuperCard Pro |
-|---------|------------|----------|--------------|---------------|
-| **Price** | ~$150 (BOM)† | ~$100-150 | ~$35-50 | ~$100 |
+| Feature | FluxRipper Universal | KryoFlux | GreaseWeazle | SuperCard Pro |
+|---------|----------------------|----------|--------------|---------------|
+| **Price** | ~$99 (retail @ 1K)† | ~$100-150 | ~$35-50 | ~$100 |
 | **Open Source** | Yes (RTL+SW) | No (closed) | Yes (FW+SW) | Partial (SW open) |
-| **Interface** | AXI/PCIe | USB | USB | USB/Serial |
+| **Interface** | ISA/PCIe/USB-C | USB | USB | USB/Serial |
 | **FPGA-based** | Yes | Yes (ARM+FPGA) | No (MCU) | No (MCU) |
 | **Real-time decode** | Yes | No | No | No |
-| **FDC replacement** | ✅ 82077AA / AXI | ❌ Host USB only | ❌ Host USB only | ❌ Host USB only |
+| **FDC replacement** | ✅ 82077AA / ISA / AXI | ❌ Host USB only | ❌ Host USB only | ❌ Host USB only |
 | **Auto-detect (HW)** | ✅ DRIVE_PROFILE | ❌ Manual config | ❌ Manual/diskdef | ❌ Manual config |
-| **8" native support** | Yes (HEAD_LOAD) | Via FDADAP | Via FDADAP | Via adapter |
+| **8" native support** | Yes (HEAD_LOAD + 24V) | Via FDADAP | Via FDADAP | Via adapter |
 | **Hard-sector native** | Yes (/SECTOR) | No | Yes (v1.18+) | No |
 | **Write support** | Yes | Yes | Yes | Yes |
+| **Standalone mode** | ✅ USB-C power only | ❌ Requires PC | ❌ Requires PC | Partial (serial) |
+| **MicroSD storage** | ✅ Built-in | ❌ | ❌ | ❌ |
+| **OLED display** | ✅ 128×64 | ❌ | ❌ | ❌ |
+| **ISA RTC** | ✅ 0x70-0x71 | ❌ | ❌ | ❌ |
 
-> †**Price note:** FluxRipper ~$150 is BOM cost for DIY build. Small production runs typically add 50-100% for assembly/margin.
+> †**Price note:** FluxRipper Universal ~$99 is target retail at 1000-unit production. DIY BOM is ~$75. The Universal card combines the functionality of Quad-Flop ($60) + GreaseWeazle ($35) in one device.
 
 ---
 
@@ -40,18 +44,25 @@
 
 ## 1. Hardware Specifications
 
-| Specification | FluxRipper | KryoFlux | GreaseWeazle V4 | SuperCard Pro |
-|---------------|------------|----------|-----------------|---------------|
-| **Processor** | AMD SCU35 FPGA | ARM + FPGA | STM32F730 MCU | PIC24 MCU |
+| Specification | FluxRipper Universal | KryoFlux | GreaseWeazle V4 | SuperCard Pro |
+|---------------|----------------------|----------|-----------------|---------------|
+| **Processor** | Artix-7 FPGA + MicroBlaze V | ARM + FPGA | STM32F730 MCU | PIC24 MCU |
 | **Clock/Resolution** | 200 MHz / 5ns | ~24 MHz / ~41ns | ~72 MHz / ~14ns | 40 MIPS / 25ns |
 | **RAM** | HyperRAM 8MB | Internal | Internal | 512KB SRAM |
-| **Host Interface** | AXI-Lite / PCIe | USB 2.0 | USB 2.0 | USB / Serial |
-| **Floppy Interface** | Dual 34-pin + GPIO | Single 34-pin | Single 34-pin | Single 34-pin |
+| **Host Interface** | ISA / PCIe / USB-C | USB 2.0 | USB 2.0 | USB / Serial |
+| **Floppy Interface** | Dual 34-pin + 50-pin | Single 34-pin | Single 34-pin | Single 34-pin |
 | **Drives per interface** | 2 (4 total) | 2 | 2-3 | 2 |
-| **Power** | External 5V/12V | USB + external | USB + external | USB + external |
+| **Power** | ISA/PCIe/USB-C/ATX | USB + external | USB + external | USB + external |
+| **+24V for 8" drives** | Yes (onboard boost) | No (external) | No (external) | No (external) |
 | **Buffered outputs** | Yes (74AHCT) | Yes | Yes (V4) | Yes |
 | **Write protect jumper** | Yes | No | Yes | No |
 | **Hardware auto-detect** | DRIVE_PROFILE reg | No | No | No |
+| **MicroSD slot** | Yes (SPI) | No | No | No |
+| **OLED display** | 128×64 SSD1306 | No | No | No |
+| **Rotary encoder** | EC11 w/ button | No | No | No |
+| **Real-time clock** | PCF8563 + CR2032 | No | No | No |
+| **ISA PnP** | Yes (4 logical devices) | N/A | N/A | N/A |
+| **Power monitoring** | INA3221 (per-drive) | No | No | No |
 
 ### Extended Signal Support
 
@@ -309,16 +320,30 @@
 
 ## 7. Unique Features
 
-### FluxRipper Exclusive
+### FluxRipper Universal Exclusive
 
-**The Two Killer Features:**
+**The Three Killer Features:**
 
 | Feature | Why It Matters |
 |---------|----------------|
-| **82077AA-Compatible FDC** | Drop-in replacement for legacy systems. Real-time sector read/write via AXI registers — not a USB peripheral that needs host software. Build a retro PC clone, NeXT restoration, or industrial controller with actual floppy I/O. |
+| **82077AA-Compatible FDC** | Drop-in replacement for legacy systems. Real-time sector read/write via ISA bus or AXI registers — not a USB peripheral that needs host software. Build a retro PC clone, NeXT restoration, or industrial controller with actual floppy I/O. |
 | **DRIVE_PROFILE Auto-Detection** | Single 32-bit register reports: form factor (3.5"/5.25"/8"), density (DD/HD/ED), track density (40/80/77), encoding (MFM/FM/GCR/M2FM/etc.), RPM, quality score. No manual config — plug in any drive, read the profile. |
+| **True Standalone Operation** | USB-C powered with MicroSD storage, OLED display, and rotary encoder. Copy disks, browse images, and configure settings without any PC connection. |
 
-**Additional Exclusive Features:**
+**Universal Card Features:**
+
+| Feature | Description |
+|---------|-------------|
+| **Triple host interface** | ISA (8/16-bit) + PCIe x1 + USB-C on single PCB |
+| **ISA Plug and Play** | Auto-configuration with 4 logical devices (FDC A, FDC B, Extensions, RTC) |
+| **ISA Real-Time Clock** | MC146818-compatible RTC at 0x70-0x71 for XT clones without built-in clock |
+| **MicroSD storage** | Store 1000+ disk images for standalone operation |
+| **OLED + rotary encoder** | Menu-driven UI without PC — select source, dest, browse images |
+| **Per-drive power monitoring** | INA3221 sensors on all +5V/+12V/+24V rails with alerts |
+| **+24V boost converter** | Onboard 12V→24V for 8" drive head load solenoids |
+| **Native 50-pin Shugart** | Direct 8" drive connection without adapter |
+
+**Core FDC Features:**
 
 | Feature | Description |
 |---------|-------------|
@@ -370,29 +395,38 @@
 |----------|-------------|-----|
 | **Budget preservation** | GreaseWeazle | Low cost, open source, good format support |
 | **Professional archival** | KryoFlux | IPF support, proven track record, SPS backing |
-| **8" drives native** | FluxRipper | Native HEAD_LOAD, no adapter needed |
+| **8" drives native** | FluxRipper Universal | Native HEAD_LOAD + 24V + 50-pin, no adapter needed |
 | **Hard-sectored media** | FluxRipper or GreaseWeazle | Native /SECTOR support |
-| **Macintosh GCR** | FluxRipper | Hardware zone decode at full speed |
-| **Real-time FDC replacement** | FluxRipper | 82077AA-compatible, AXI interface |
-| **Soviet/Agat disks** | FluxRipper | Only controller with Agat encoding |
-| **Quick disk copying** | SuperCard Pro | Direct disk-to-disk without PC |
-| **Embedded systems** | FluxRipper | FPGA-based, AXI interface, no host OS |
+| **Macintosh GCR** | FluxRipper Universal | Hardware zone decode at full speed |
+| **Real-time FDC replacement** | FluxRipper Universal | 82077AA-compatible, ISA/AXI interface |
+| **Retro PC restoration (ISA)** | FluxRipper Universal | ISA slot + PnP + RTC for XT/AT clones |
+| **Soviet/Agat disks** | FluxRipper Universal | Only controller with Agat encoding |
+| **Quick disk copying** | FluxRipper Universal | Standalone mode with OLED + MicroSD |
+| **Portable field use** | FluxRipper Universal | USB-C powered, no PC required |
+| **Embedded systems** | FluxRipper Universal | FPGA-based, AXI interface, no host OS |
 | **Copy-protected Amiga/ST** | KryoFlux | IPF write-back support |
-| **TRS-80 CoCo** | FluxRipper | Hardware Tandy FM decode |
+| **TRS-80 CoCo** | FluxRipper Universal | Hardware Tandy FM decode |
 | **Learning/experimentation** | GreaseWeazle | Open source, extensive documentation |
 | **Japanese retro (PC-98)** | FluxRipper or GreaseWeazle | Native 77-track + TG43 |
-| **DEC M2FM systems** | FluxRipper | Hardware M2FM decode |
+| **DEC M2FM systems** | FluxRipper Universal | Hardware M2FM decode |
+| **Drive diagnostics** | FluxRipper Universal | Per-drive power monitoring, signal quality |
 
 ### Decision Matrix
 
 ```
 START
   │
-  ├─ Building hardware that needs an actual FDC?
-  │   └─ YES → FluxRipper (only option with 82077AA/AXI interface)
+  ├─ Need ISA card for retro PC restoration?
+  │   └─ YES → FluxRipper Universal (ISA + PnP + RTC)
   │
-  ├─ Need 8" with native HEAD_LOAD?
-  │   └─ YES → FluxRipper
+  ├─ Building hardware that needs an actual FDC?
+  │   └─ YES → FluxRipper Universal (82077AA/ISA/AXI interface)
+  │
+  ├─ Need 8" with native HEAD_LOAD + 24V?
+  │   └─ YES → FluxRipper Universal (no adapter needed)
+  │
+  ├─ Need standalone operation (no PC)?
+  │   └─ YES → FluxRipper Universal (USB-C + MicroSD + OLED)
   │
   ├─ Need copy-protected IPF write-back?
   │   └─ YES → KryoFlux
@@ -401,21 +435,25 @@ START
   │   └─ YES → GreaseWeazle
   │
   ├─ Need disk-to-disk standalone copy?
-  │   └─ YES → SuperCard Pro
+  │   └─ YES → FluxRipper Universal (MicroSD) or SuperCard Pro
   │
   ├─ Need Macintosh GCR at full speed?
-  │   └─ YES → FluxRipper
+  │   └─ YES → FluxRipper Universal
   │
   ├─ Need hard-sectored (NorthStar etc)?
-  │   └─ YES → FluxRipper or GreaseWeazle
+  │   └─ YES → FluxRipper Universal or GreaseWeazle
   │
   ├─ Want hardware auto-detection (no manual config)?
-  │   └─ YES → FluxRipper (DRIVE_PROFILE)
+  │   └─ YES → FluxRipper Universal (DRIVE_PROFILE)
+  │
+  ├─ Need drive health diagnostics?
+  │   └─ YES → FluxRipper Universal (power monitoring)
   │
   ├─ General preservation work?
   │   └─ Any will work; GreaseWeazle for cost, KryoFlux for ecosystem
   │
-  └─ Default recommendation: GreaseWeazle (best value)
+  └─ Default recommendation: GreaseWeazle (best value) or
+     FluxRipper Universal (most features)
 ```
 
 ---

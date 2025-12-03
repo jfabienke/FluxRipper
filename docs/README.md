@@ -1,6 +1,6 @@
 # FluxRipper FPGA Documentation
 
-*Updated: 2025-12-03 19:45*
+*Updated: 2025-12-03 23:45*
 
 ## Overview
 
@@ -11,7 +11,29 @@ FluxRipper is an FPGA-based System-on-Chip that implements an enhanced Intel 820
 - Parallel flux capture for high-throughput imaging
 - Disk-to-disk copy capability
 - Full 82077AA command compatibility
-- Multi-format support: MFM, FM, GCR (CBM/Apple)
+- Multi-format support: MFM, FM, GCR (CBM/Apple), M2FM, Tandy
+
+## FluxRipper Universal Card
+
+The FluxRipper Universal is a multi-host PCB design that functions as:
+
+| Mode | Power Source | Host Interface | Use Case |
+|------|--------------|----------------|----------|
+| **ISA Card** | ISA bus +5V/+12V | ISA (3F0-3F7, DMA, IRQ) | Retro PC restoration |
+| **PCIe Card** | PCIe slot +3.3V/+12V | PCIe BAR0, MSI-X | Modern PC integration |
+| **USB Device** | USB-C (host) | USB CDC/Bulk | Cross-platform tool |
+| **Standalone** | USB-C PD (charger) | USB serial console | Portable disk utility |
+
+### Universal Card Features
+
+- **MicroSD Card Slot** - Standalone disk image storage (.IMG, .ADF, .D64, etc.)
+- **Real-Time Clock** - PCF8563 with CR2032 backup for accurate FAT timestamps
+  - ISA-accessible as AT-compatible RTC (ports 0x70-0x71) for XT clones
+- **Rotary Encoder** - EC11 with push button for menu-driven standalone operation
+- **SPI OLED Display** - 128×64 SSD1306 for status and navigation
+- **ISA Plug and Play** - Auto-configuration for Windows 95+ and PnP BIOS
+- **8" Drive Support** - Native 50-pin Shugart with HEAD_LOAD and +24V rail
+- **Per-Drive Power Monitoring** - INA3221 for voltage/current on all drives
 
 ## Project Status
 
@@ -107,21 +129,43 @@ FluxRipper is an FPGA-based System-on-Chip that implements an enhanced Intel 820
 rtl/
 ├── top/               # Top-level integration
 │   ├── fluxripper_top.v         # Single-interface top
-│   └── fluxripper_dual_top.v    # Dual-interface top (4 drives)
+│   ├── fluxripper_dual_top.v    # Dual-interface top (4 drives)
+│   └── fluxripper_universal_top.v # Universal card top (ISA/PCIe/USB)
 ├── fdc_core/          # Command FSM, registers
 │   ├── command_fsm.v            # FDC command state machine
 │   ├── fdc_registers.v          # 82077AA register interface
 │   └── fdc_core_instance.v      # FDC instance wrapper (for dual)
 ├── data_separator/    # Digital PLL (6 submodules)
+│   └── zone_calculator.v        # Mac GCR variable-speed zones
 ├── am_detector/       # Address mark detection
-├── encoding/          # MFM, FM, GCR codecs
+├── encoding/          # MFM, FM, GCR, M2FM, Tandy codecs
+│   ├── mfm_codec.v              # MFM encode/decode
+│   ├── fm_codec.v               # FM encode/decode
+│   ├── gcr_apple.v              # Apple GCR 5&3 / 6&2
+│   ├── gcr_cbm.v                # Commodore GCR
+│   ├── m2fm_codec.v             # DEC/Intel M2FM
+│   └── tandy_sync.v             # Tandy/CoCo FM sync
 ├── crc/               # CRC-16 CCITT
 ├── drive_ctrl/        # Step, motor, index
 │   ├── step_controller.v        # Head positioning
 │   ├── motor_controller.v       # Motor control (4-drive)
 │   └── index_handler_dual.v     # 4-index handler with RPM
 ├── write_path/        # Write precompensation
-├── diagnostics/       # Flux capture, quality
+├── diagnostics/       # Flux capture, quality, drive profile
+│   ├── flux_capture.v           # Flux transition capture
+│   ├── flux_analyzer.v          # Data rate detection
+│   └── drive_profile_detector.v # Auto-detect drive characteristics
+├── host_interface/    # Universal card host adapters
+│   ├── host_interface.v         # Unified register abstraction
+│   ├── host_isa_adapter.v       # ISA bus protocol + DMA
+│   ├── host_usb_adapter.v       # USB via FT232H
+│   ├── isa_dma_controller.v     # ISA DMA channels
+│   ├── isa_pnp_controller.v     # ISA Plug and Play
+│   └── isa_cdc.v                # ISA clock domain crossing
+├── peripherals/       # Universal card peripherals
+│   ├── spi_oled_driver.v        # SSD1306 OLED
+│   ├── oled_framebuffer.v       # 128x64 pixel buffer
+│   └── power_manager.v          # USB-C PD status
 └── axi/               # AXI infrastructure for SoC
     ├── axi_stream_flux.v        # Single AXI-Stream master
     ├── axi_stream_flux_dual.v   # Dual AXI-Stream (parallel capture)

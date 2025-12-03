@@ -1,8 +1,10 @@
 # FluxRipper Drive Support Reference
 
-*Updated: 2025-12-03 15:45*
+*Updated: 2025-12-03 23:55*
 
 This document details the physical floppy drive types supported by FluxRipper, including interface specifications, track densities, data rates, and compatibility notes.
+
+> **FluxRipper Universal Card:** The Universal card adds native 8" drive support with onboard +24V boost converter, HEAD_LOAD signal, and 50-pin Shugart connector. All drive types listed below are supported.
 
 ---
 

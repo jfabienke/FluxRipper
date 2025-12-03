@@ -246,24 +246,24 @@ Flux Timing Histogram:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│              Disk Authenticity Analysis                          │
-│                                                                  │
+│              Disk Authenticity Analysis                         │
+│                                                                 │
 │  Step 1: Baseline Capture                                       │
 │  • Capture entire disk, 5+ revolutions per track                │
 │  • Record quality metrics, PLL behavior, RPM per revolution     │
-│                                                                  │
+│                                                                 │
 │  Step 2: Consistency Analysis                                   │
 │  • Compare inter-track characteristics:                         │
 │    - Do all tracks show similar PLL lock behavior?              │
 │    - Is RPM consistent across disk?                             │
 │    - Are write splice patterns uniform?                         │
-│                                                                  │
+│                                                                 │
 │  Step 3: Anomaly Detection                                      │
 │  • Flag tracks with:                                            │
 │    - Significantly different quality profile                    │
 │    - Unusual flux timing distribution                           │
 │    - Different effective data rate                              │
-│                                                                  │
+│                                                                 │
 │  Step 4: Report                                                 │
 │  • "Disk appears original" OR                                   │
 │  • "Tracks X, Y, Z show evidence of later modification"         │

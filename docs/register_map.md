@@ -1,6 +1,6 @@
 # FluxRipper Register Map
 
-*Updated: 2025-12-03 23:20*
+*Updated: 2025-12-03 23:55*
 
 ## Intel 82077AA Compatible Registers
 
@@ -819,3 +819,166 @@ FluxRipper provides additional control signals for 8" drives, 5.25" HD drives, a
 | /TG43 | Output | D15 | H15 |
 | DENSITY | Output | A16 | E16 |
 | /SECTOR | Input | B16 | F16 |
+
+---
+
+## ISA Real-Time Clock Registers (Universal Card)
+
+The FluxRipper Universal card exposes its onboard PCF8563 RTC as an **AT-compatible MC146818 CMOS RTC** for legacy systems without a built-in clock.
+
+### RTC Port Addresses (ISA Bus)
+
+| Address | Name | Access | Description |
+|---------|------|--------|-------------|
+| 0x70 | RTC_ADDR | W | CMOS address register (index 0x00-0x3F) |
+| 0x71 | RTC_DATA | R/W | CMOS data register |
+
+### Standard CMOS Registers (MC146818 Compatible)
+
+| Index | Name | Access | Description |
+|-------|------|--------|-------------|
+| 0x00 | Seconds | R/W | Current seconds (BCD 00-59) |
+| 0x01 | Seconds Alarm | R/W | Alarm seconds (BCD 00-59) |
+| 0x02 | Minutes | R/W | Current minutes (BCD 00-59) |
+| 0x03 | Minutes Alarm | R/W | Alarm minutes (BCD 00-59) |
+| 0x04 | Hours | R/W | Current hours (BCD 00-23 or 01-12+AM/PM) |
+| 0x05 | Hours Alarm | R/W | Alarm hours |
+| 0x06 | Day of Week | R/W | Day of week (1-7, Sunday=1) |
+| 0x07 | Day of Month | R/W | Day of month (BCD 01-31) |
+| 0x08 | Month | R/W | Month (BCD 01-12) |
+| 0x09 | Year | R/W | Year (BCD 00-99) |
+| 0x0A | Status A | R/W | Update-in-progress flag, divider |
+| 0x0B | Status B | R/W | Interrupt enables, data format |
+| 0x0C | Status C | R | Interrupt flags (read clears) |
+| 0x0D | Status D | R | Battery status (VRT bit) |
+| 0x32 | Century | R/W | Century (BCD 19-20) |
+
+### Status Register A (0x0A)
+
+| Bit | Name | Description |
+|-----|------|-------------|
+| 7 | UIP | Update In Progress (1 = update cycle active) |
+| 6:4 | DV | Divider select (typically 010 for 32.768kHz) |
+| 3:0 | RS | Rate select (periodic interrupt rate) |
+
+**Note:** Wait for UIP=0 before reading time to avoid reading during update.
+
+### Status Register B (0x0B)
+
+| Bit | Name | Description |
+|-----|------|-------------|
+| 7 | SET | 1 = Halt updates for setting time |
+| 6 | PIE | Periodic Interrupt Enable |
+| 5 | AIE | Alarm Interrupt Enable |
+| 4 | UIE | Update-ended Interrupt Enable |
+| 3 | SQWE | Square Wave Enable |
+| 2 | DM | Data Mode (0=BCD, 1=Binary) |
+| 1 | 24/12 | Hour format (1=24-hour, 0=12-hour) |
+| 0 | DSE | Daylight Savings Enable |
+
+### Status Register C (0x0C) - Read Only
+
+| Bit | Name | Description |
+|-----|------|-------------|
+| 7 | IRQF | Interrupt Request Flag |
+| 6 | PF | Periodic Interrupt Flag |
+| 5 | AF | Alarm Flag |
+| 4 | UF | Update-ended Flag |
+| 3:0 | - | Reserved (0) |
+
+**Note:** Reading this register clears all interrupt flags.
+
+### Status Register D (0x0D) - Read Only
+
+| Bit | Name | Description |
+|-----|------|-------------|
+| 7 | VRT | Valid RAM and Time (1 = battery OK) |
+| 6:0 | - | Reserved (0) |
+
+### Implementation Notes
+
+**Hardware Translation:**
+- PCF8563 (I2C) registers are translated to MC146818 format in FPGA logic
+- BCD conversion handled automatically
+- ~50 LUTs for address decode + BCD conversion
+
+**Battery Backup:**
+- CR2032 coin cell maintains time when system powered off
+- VRT bit (Status D, bit 7) indicates battery health
+
+**Use Cases:**
+- **XT Clones:** Add RTC to IBM PC, early clones without built-in clock
+- **DOS DATE/TIME:** Automatic clock set at boot via BIOS
+- **Legacy Software:** Y2K-compliant century register (0x32)
+
+**DIP Switch Configuration:**
+- SW1-5: RTC Enable (ON = enabled at 0x70-0x71, OFF = disabled)
+- Disable RTC on systems with built-in CMOS RTC to avoid conflicts
+
+### Usage Example (DOS/BIOS)
+
+```asm
+; Read current hour from RTC
+    mov  al, 04h        ; Index 04h = Hours
+    out  70h, al        ; Write to address port
+    in   al, 71h        ; Read from data port
+    ; AL now contains hours in BCD format
+
+; Set time (example: 12:30:00)
+    mov  al, 0Bh        ; Status B register
+    out  70h, al
+    in   al, 71h
+    or   al, 80h        ; Set SET bit (halt updates)
+    out  71h, al
+
+    mov  al, 04h        ; Hours
+    out  70h, al
+    mov  al, 12h        ; 12 hours (BCD)
+    out  71h, al
+
+    mov  al, 02h        ; Minutes
+    out  70h, al
+    mov  al, 30h        ; 30 minutes (BCD)
+    out  71h, al
+
+    mov  al, 00h        ; Seconds
+    out  70h, al
+    mov  al, 00h        ; 00 seconds (BCD)
+    out  71h, al
+
+    mov  al, 0Bh        ; Status B
+    out  70h, al
+    in   al, 71h
+    and  al, 7Fh        ; Clear SET bit (resume updates)
+    out  71h, al
+```
+
+---
+
+## Universal Card Extended Registers
+
+### MicroSD Status (SPI)
+
+| Register | Address | Description |
+|----------|---------|-------------|
+| SD_STATUS | 0xA0 | Card detect, write protect, busy |
+| SD_CTRL | 0xA4 | SPI enable, clock divider |
+
+### Rotary Encoder
+
+| Register | Address | Description |
+|----------|---------|-------------|
+| ENC_STATUS | 0xB0 | Position delta, button state |
+| ENC_COUNT | 0xB4 | Absolute position counter |
+
+### Power Monitor (INA3221)
+
+| Register | Address | Description |
+|----------|---------|-------------|
+| PWR_DRV0 | 0x80 | Drive 0: +5V current [15:0], +12V current [31:16] |
+| PWR_DRV1 | 0x84 | Drive 1: +5V current [15:0], +12V current [31:16] |
+| PWR_DRV2 | 0x88 | Drive 2: +5V current [15:0], +12V current [31:16] |
+| PWR_DRV3 | 0x8C | Drive 3: +5V current [15:0], +12V current [31:16] |
+| PWR_RAILS | 0x90 | +5V voltage [15:0], +12V voltage [31:16] |
+| PWR_24V | 0x94 | +24V voltage [15:0], +24V current [31:16] |
+| PWR_ALERTS | 0x98 | Over-current/under-voltage flags |
