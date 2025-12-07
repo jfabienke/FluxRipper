@@ -1,398 +1,408 @@
+// SPDX-License-Identifier: BSD-3-Clause
 //-----------------------------------------------------------------------------
-// FluxRipper Top Module
-// FPGA-based Intel 82077AA Floppy Disk Controller Clone
+// fluxripper_top.v - FluxRipper Top-Level Module
 //
-// Based on CAPSImg CapsFDCEmulator
-// Target: Xilinx Spartan UltraScale+ (UC+)
+// Part of FluxRipper - Open-source disk preservation system
+// Copyright (c) 2025 John Fabienke
 //
-// Updated: 2025-12-02 17:00
+// Created: 2025-12-07 22:45
+// Updated: 2025-12-07 23:35 - Added synthesis attributes for FPGA
+//
+// Description:
+//   Top-level integration of all FluxRipper subsystems.
+//   Connects JTAG debug, clock/reset, bus fabric, and peripherals.
+//
 //-----------------------------------------------------------------------------
 
 module fluxripper_top (
-    // System
-    input  wire        clk_200mhz,      // 200 MHz system clock
-    input  wire        reset_n,         // Active low reset
+    //-------------------------------------------------------------------------
+    // Clock and Reset
+    //-------------------------------------------------------------------------
+    input           clk_25m,        // 25 MHz reference clock
+    input           rst_n,          // External reset (active low)
 
-    // CPU Interface (directly directly directly directly directly directly directly directly directly directly directly directly directly directly directly directly directly directly directly directly directly directly directly  directly directly-compatible)
-    input  wire [2:0]  addr,            // A0-A2 register address
-    input  wire        cs_n,            // Chip select
-    input  wire        rd_n,            // Read strobe
-    input  wire        wr_n,            // Write strobe
-    inout  wire [7:0]  data,            // Bidirectional data bus
-    output wire        irq,             // Interrupt request
-    output wire        drq,             // DMA request
+    //-------------------------------------------------------------------------
+    // JTAG Interface
+    //-------------------------------------------------------------------------
+    input           tck,            // JTAG test clock
+    input           tms,            // JTAG test mode select
+    input           tdi,            // JTAG test data in
+    output          tdo,            // JTAG test data out
+    input           trst_n,         // JTAG reset (active low)
 
-    // Drive 0 Interface
-    output wire        drv0_step,       // Step pulse
-    output wire        drv0_dir,        // Direction (1=in, 0=out)
-    output wire        drv0_motor,      // Motor on
-    output wire        drv0_head_sel,   // Head select (0=bottom, 1=top)
-    output wire        drv0_write_gate, // Write gate
-    output wire        drv0_write_data, // Write data
-    input  wire        drv0_read_data,  // Read data (flux)
-    input  wire        drv0_index,      // Index pulse
-    input  wire        drv0_track0,     // Track 0 sensor
-    input  wire        drv0_wp,         // Write protect
-    input  wire        drv0_ready,      // Drive ready
-    input  wire        drv0_dskchg,     // Disk change
+    //-------------------------------------------------------------------------
+    // Disk Interface
+    //-------------------------------------------------------------------------
+    input           flux_in,        // Flux transition input
+    input           index_in,       // Index pulse input
+    output          motor_on,       // Motor enable
+    output          head_sel,       // Head select
+    output          dir,            // Step direction
+    output          step,           // Step pulse
 
-    // Drive 1 Interface (active accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent accent-accent accent-same as drive 0)
-    output wire        drv1_step,
-    output wire        drv1_dir,
-    output wire        drv1_motor,
-    output wire        drv1_head_sel,
-    output wire        drv1_write_gate,
-    output wire        drv1_write_data,
-    input  wire        drv1_read_data,
-    input  wire        drv1_index,
-    input  wire        drv1_track0,
-    input  wire        drv1_wp,
-    input  wire        drv1_ready,
-    input  wire        drv1_dskchg,
+    //-------------------------------------------------------------------------
+    // USB Interface (directly exposed for PHY)
+    //-------------------------------------------------------------------------
+    output          usb_connected,
+    output          usb_configured,
 
-    // Diagnostic outputs
-    output wire        pll_locked,
-    output wire [7:0]  lock_quality,
-    output wire [7:0]  current_track,
-    output wire        sync_acquired,
-
-    // Status LEDs
-    output wire        led_activity,
-    output wire        led_error
+    //-------------------------------------------------------------------------
+    // Debug Signals
+    //-------------------------------------------------------------------------
+    output          pll_locked,     // PLL lock status
+    output          sys_rst_n       // System reset status
 );
 
-    //-------------------------------------------------------------------------
-    // Internal signals
-    //-------------------------------------------------------------------------
-    wire        reset = ~reset_n;
-    wire        clk = clk_200mhz;
+    //=========================================================================
+    // Internal Signals
+    //=========================================================================
 
-    // Data bus control
-    reg  [7:0]  data_out;
-    wire [7:0]  data_in = data;
-    wire        data_oe;
-    assign data = data_oe ? data_out : 8'hZZ;
+    // Clocks from clock manager
+    wire            clk_sys;        // 100 MHz system clock
+    wire            clk_usb;        // 48 MHz USB clock
+    wire            clk_disk;       // 50 MHz disk clock
+    wire            sys_rst_n_int;
+    wire            pll_locked_int;
 
-    // Register interface signals
-    wire [1:0]  data_rate;
-    wire [3:0]  motor_on;
-    wire [1:0]  drive_sel;
-    wire        dma_enable;
-    wire        sw_reset;
-    wire [3:0]  precomp_delay;
-    wire [3:0]  drive_ready_status;
-    wire        fdc_busy;
-    wire        fdc_ndma;
-    wire [3:0]  fdc_dio;
-    wire        fdc_rqm;
+    // TAP internal signals
+    wire [4:0]      ir_value;
+    wire            dr_capture, dr_shift, dr_update;
+    wire            tap_tdo, dtm_tdo;
 
-    // FIFO signals
-    wire [7:0]  fifo_data_out;
-    wire        fifo_write;
-    wire [7:0]  fifo_data_in;
-    wire        fifo_read;
-    wire        fifo_empty;
-    wire        fifo_full;
+    // DMI interface (DTM <-> Debug Module)
+    (* MARK_DEBUG = "true" *) wire [6:0]      dmi_addr;
+    (* MARK_DEBUG = "true" *) wire [31:0]     dmi_wdata;
+    (* MARK_DEBUG = "true" *) wire [1:0]      dmi_op;
+    (* MARK_DEBUG = "true" *) wire            dmi_req;
+    (* MARK_DEBUG = "true" *) wire [31:0]     dmi_rdata;
+    (* MARK_DEBUG = "true" *) wire [1:0]      dmi_resp;
+    (* MARK_DEBUG = "true" *) wire            dmi_ack;
 
-    // Drive mux signals
-    wire        active_read_data;
-    wire        active_index;
-    wire        active_track0;
-    wire        active_wp;
-    wire        active_ready;
-    wire        active_dskchg;
+    // System bus master (Debug Module <-> Bus)
+    (* MARK_DEBUG = "true" *) wire [31:0]     sb_addr;
+    (* MARK_DEBUG = "true" *) wire [31:0]     sb_wdata;
+    (* MARK_DEBUG = "true" *) wire [31:0]     sb_rdata;
+    (* MARK_DEBUG = "true" *) wire [2:0]      sb_size;
+    (* MARK_DEBUG = "true" *) wire            sb_read;
+    (* MARK_DEBUG = "true" *) wire            sb_write;
+    (* MARK_DEBUG = "true" *) wire            sb_busy;
+    (* MARK_DEBUG = "true" *) wire            sb_error;
 
-    // Command FSM signals
-    wire        cmd_seek_start;
-    wire [7:0]  cmd_seek_target;
-    wire        cmd_restore;
-    wire        cmd_read_enable;
-    wire        cmd_write_enable;
-    wire        cmd_crc_reset;
-    wire [1:0]  cmd_head_select;
+    // Slave interfaces
+    wire [15:0]     rom_addr;
+    wire            rom_read;
+    wire [31:0]     rom_rdata;
+    wire            rom_ready;
 
-    // Step controller signals
-    wire        step_pulse;
-    wire        step_dir;
-    wire        step_head_load;
-    wire [7:0]  step_current_track;
-    wire [7:0]  step_physical_track;
-    wire        step_complete;
-    wire        step_at_track0;
-    wire        step_busy;
+    wire [27:0]     ram_addr;
+    wire [31:0]     ram_wdata;
+    wire            ram_read;
+    wire            ram_write;
+    wire [31:0]     ram_rdata;
+    wire            ram_ready;
 
-    // DPLL signals
-    wire        dpll_data_bit;
-    wire        dpll_data_ready;
-    wire        dpll_bit_clk;
-    wire        dpll_locked;
-    wire [7:0]  dpll_quality;
-    wire [1:0]  dpll_margin;
+    wire [7:0]      sysctrl_addr;
+    wire [31:0]     sysctrl_wdata;
+    wire            sysctrl_read;
+    wire            sysctrl_write;
+    wire [31:0]     sysctrl_rdata;
+    wire            sysctrl_ready;
 
-    // AM detector signals
-    wire        am_a1_detected;
-    wire        am_c2_detected;
-    wire [1:0]  am_sync_count;
-    wire        am_sync_acquired;
-    wire [7:0]  am_data_byte;
-    wire        am_byte_ready;
+    wire [7:0]      disk_addr;
+    wire [31:0]     disk_wdata;
+    wire            disk_read;
+    wire            disk_write;
+    wire [31:0]     disk_rdata;
+    wire            disk_ready;
 
-    // CRC signals
-    wire        crc_enable;
-    wire        crc_init;
-    wire [7:0]  crc_data;
-    wire [15:0] crc_value;
-    wire        crc_valid;
+    wire [7:0]      usb_addr;
+    wire [31:0]     usb_wdata;
+    wire            usb_read;
+    wire            usb_write;
+    wire [31:0]     usb_rdata;
+    wire            usb_ready;
 
-    // Motor controller signals
-    wire [3:0]  motor_running;
-    wire [3:0]  motor_at_speed;
+    wire [7:0]      sigtap_addr;
+    wire [31:0]     sigtap_wdata;
+    wire            sigtap_read;
+    wire            sigtap_write;
+    wire [31:0]     sigtap_rdata;
+    wire            sigtap_ready;
 
-    // Status signals from command FSM
-    wire [1:0]  st_int_code;
-    wire        st_seek_end;
-    wire        st_equipment_check;
-    wire        st_end_of_cylinder;
-    wire        st_data_error;
-    wire        st_overrun;
-    wire        st_no_data;
-    wire        st_missing_am;
+    // DMA signals (disk controller)
+    wire [31:0]     dma_addr;
+    wire [31:0]     dma_wdata;
+    wire            dma_write;
 
-    //-------------------------------------------------------------------------
-    // Drive multiplexer
-    //-------------------------------------------------------------------------
-    assign active_read_data = (drive_sel == 2'b00) ? drv0_read_data : drv1_read_data;
-    assign active_index     = (drive_sel == 2'b00) ? drv0_index : drv1_index;
-    assign active_track0    = (drive_sel == 2'b00) ? drv0_track0 : drv1_track0;
-    assign active_wp        = (drive_sel == 2'b00) ? drv0_wp : drv1_wp;
-    assign active_ready     = (drive_sel == 2'b00) ? drv0_ready : drv1_ready;
-    assign active_dskchg    = (drive_sel == 2'b00) ? drv0_dskchg : drv1_dskchg;
+    // Signal Tap probe signals
+    wire [31:0]     probes;
 
-    assign drive_ready_status = {drv1_ready, drv1_ready, drv0_ready, drv0_ready};
+    //=========================================================================
+    // TDO Multiplexing
+    //=========================================================================
+    assign tdo = (ir_value == 5'h10 || ir_value == 5'h11) ? dtm_tdo : tap_tdo;
 
-    //-------------------------------------------------------------------------
-    // Register Interface
-    //-------------------------------------------------------------------------
-    fdc_registers u_registers (
-        .clk(clk),
-        .reset(reset || sw_reset),
-        .addr(addr),
-        .cs_n(cs_n),
-        .rd_n(rd_n),
-        .wr_n(wr_n),
-        .data_in(data_in),
-        .data_out(data_out),
-        .data_oe(data_oe),
-        .data_rate(data_rate),
-        .motor_on(motor_on),
-        .drive_sel(drive_sel),
-        .dma_enable(dma_enable),
-        .reset_out(sw_reset),
-        .precomp_delay(precomp_delay),
-        .drive_ready(drive_ready_status),
-        .busy(fdc_busy),
-        .ndma(fdc_ndma),
-        .dio(fdc_dio),
-        .rqm(fdc_rqm),
-        .fifo_data_out(fifo_data_out),
-        .fifo_write(fifo_write),
-        .fifo_data_in(fifo_data_in),
-        .fifo_read(fifo_read),
-        .fifo_empty(fifo_empty),
-        .fifo_full(fifo_full),
-        .int_out(irq),
-        .int_ack(1'b0)
+    //=========================================================================
+    // Output assignments
+    //=========================================================================
+    assign pll_locked = pll_locked_int;
+    assign sys_rst_n = sys_rst_n_int;
+
+    //=========================================================================
+    // Signal Tap Probes
+    //=========================================================================
+    assign probes = {
+        8'h00,                  // [31:24] Reserved
+        motor_on, head_sel, dir, step,  // [23:20] Disk control
+        flux_in, index_in, 2'b0,        // [19:16] Disk inputs
+        usb_connected, usb_configured, 2'b0,  // [15:12] USB status
+        pll_locked_int, sys_rst_n_int, 2'b0,  // [11:8] Clock/reset
+        ir_value[4:0], 3'b0             // [7:0] JTAG state
+    };
+
+    //=========================================================================
+    // Clock and Reset Manager
+    //=========================================================================
+    clock_reset_mgr u_clk_rst (
+        .clk_ref        (clk_25m),
+        .rst_ext_n      (rst_n),
+        .clk_sys        (clk_sys),
+        .clk_usb        (clk_usb),
+        .clk_disk       (clk_disk),
+        .pll_locked     (pll_locked_int),
+        .rst_sys_n      (sys_rst_n_int),
+        .rst_usb_n      (),
+        .rst_disk_n     (),
+        .rst_debug_n    (trst_n),
+        .rst_dbg_sync_n (),
+        .wdt_kick       (1'b1),         // Keep watchdog happy
+        .wdt_reset      ()
     );
 
-    //-------------------------------------------------------------------------
-    // FIFO
-    //-------------------------------------------------------------------------
-    fdc_fifo u_fifo (
-        .clk(clk),
-        .reset(reset || sw_reset),
-        .data_in(fifo_data_out),
-        .write_en(fifo_write),
-        .data_out(fifo_data_in),
-        .read_en(fifo_read),
-        .empty(fifo_empty),
-        .full(fifo_full),
-        .count(),
-        .threshold(4'd1),
-        .threshold_reached(drq)
+    //=========================================================================
+    // JTAG TAP Controller
+    //=========================================================================
+    jtag_tap_controller #(
+        .IDCODE(32'hFB010001),
+        .IR_LENGTH(5)
+    ) u_tap (
+        .tck            (tck),
+        .tms            (tms),
+        .tdi            (tdi),
+        .tdo            (tap_tdo),
+        .trst_n         (trst_n),
+        .ir_value       (ir_value),
+        .dr_capture     (dr_capture),
+        .dr_shift       (dr_shift),
+        .dr_update      (dr_update)
     );
 
-    //-------------------------------------------------------------------------
-    // Command FSM
-    //-------------------------------------------------------------------------
-    command_fsm u_command_fsm (
-        .clk(clk),
-        .reset(reset || sw_reset),
-        .enable(1'b1),
-        .command_byte(fifo_data_out),
-        .command_valid(fifo_write),
-        .fifo_data(fifo_data_in),
-        .fifo_empty(fifo_empty),
-        .fifo_read(),
-        .fifo_write_data(),
-        .fifo_write(),
-        .seek_start(cmd_seek_start),
-        .seek_target(cmd_seek_target),
-        .restore(cmd_restore),
-        .seek_complete(step_complete),
-        .current_track(step_current_track),
-        .at_track0(step_at_track0),
-        .read_enable(cmd_read_enable),
-        .read_data(am_data_byte),
-        .read_ready(am_byte_ready),
-        .sync_acquired(am_sync_acquired),
-        .a1_detected(am_a1_detected),
-        .write_enable(cmd_write_enable),
-        .write_data(),
-        .write_valid(),
-        .crc_reset(cmd_crc_reset),
-        .crc_valid(crc_valid),
-        .crc_value(crc_value),
-        .head_select(cmd_head_select),
-        .index_pulse(active_index),
-        .write_protect(active_wp),
-        .int_code(st_int_code),
-        .seek_end(st_seek_end),
-        .equipment_check(st_equipment_check),
-        .end_of_cylinder(st_end_of_cylinder),
-        .data_error(st_data_error),
-        .overrun(st_overrun),
-        .no_data(st_no_data),
-        .missing_am(st_missing_am),
-        .busy(fdc_busy),
-        .dio(fdc_dio[0]),
-        .rqm(fdc_rqm),
-        .ndma(fdc_ndma),
-        .interrupt()
+    //=========================================================================
+    // Debug Transport Module
+    //=========================================================================
+    jtag_dtm u_dtm (
+        .tck            (tck),
+        .trst_n         (trst_n),
+        .ir_value       (ir_value),
+        .dr_capture     (dr_capture),
+        .dr_shift       (dr_shift),
+        .dr_update      (dr_update),
+        .tdi            (tdi),
+        .tdo            (dtm_tdo),
+        .dmi_addr       (dmi_addr),
+        .dmi_wdata      (dmi_wdata),
+        .dmi_op         (dmi_op),
+        .dmi_req        (dmi_req),
+        .dmi_rdata      (dmi_rdata),
+        .dmi_resp       (dmi_resp),
+        .dmi_ack        (dmi_ack)
     );
 
-    //-------------------------------------------------------------------------
-    // Step Controller
-    //-------------------------------------------------------------------------
-    step_controller u_step_ctrl (
-        .clk(clk),
-        .reset(reset || sw_reset),
-        .clk_freq(32'd200_000_000),
-        .step_rate_sel(2'b10),          // 2ms step rate
-        .double_step(1'b0),             // Configurable
-        .seek_start(cmd_seek_start),
-        .target_track(cmd_seek_target),
-        .step_in(1'b0),
-        .step_out(1'b0),
-        .restore(cmd_restore),
-        .step_pulse(step_pulse),
-        .direction(step_dir),
-        .head_load(step_head_load),
-        .current_track(step_current_track),
-        .physical_track(step_physical_track),
-        .seek_complete(step_complete),
-        .at_track0(step_at_track0),
-        .busy(step_busy)
+    //=========================================================================
+    // Debug Module
+    //=========================================================================
+    debug_module u_dm (
+        .clk            (clk_sys),
+        .rst_n          (sys_rst_n_int),
+        .dmi_addr       (dmi_addr),
+        .dmi_wdata      (dmi_wdata),
+        .dmi_op         (dmi_op),
+        .dmi_req        (dmi_req),
+        .dmi_rdata      (dmi_rdata),
+        .dmi_resp       (dmi_resp),
+        .dmi_ack        (dmi_ack),
+        .sbaddr         (sb_addr),
+        .sbdata_o       (sb_wdata),
+        .sbdata_i       (sb_rdata),
+        .sbsize         (sb_size),
+        .sbread         (sb_read),
+        .sbwrite        (sb_write),
+        .sbbusy         (sb_busy),
+        .sberror        (sb_error)
     );
 
-    //-------------------------------------------------------------------------
-    // Digital PLL (Data Separator)
-    //-------------------------------------------------------------------------
-    digital_pll u_dpll (
-        .clk(clk),
-        .reset(reset || sw_reset),
-        .enable(cmd_read_enable),
-        .data_rate(data_rate),
-        .rpm_360(1'b0),                 // Configurable
-        .lock_threshold(16'h1000),
-        .flux_in(active_read_data),
-        .data_bit(dpll_data_bit),
-        .data_ready(dpll_data_ready),
-        .bit_clk(dpll_bit_clk),
-        .pll_locked(dpll_locked),
-        .lock_quality(dpll_quality),
-        .margin_zone(dpll_margin),
-        .phase_accum(),
-        .phase_error(),
-        .bandwidth()
+    //=========================================================================
+    // System Bus Fabric
+    //=========================================================================
+    system_bus u_bus (
+        .clk            (clk_sys),
+        .rst_n          (sys_rst_n_int),
+        // Master interface
+        .m_addr         (sb_addr),
+        .m_wdata        (sb_wdata),
+        .m_rdata        (sb_rdata),
+        .m_size         (sb_size),
+        .m_read         (sb_read),
+        .m_write        (sb_write),
+        .m_busy         (sb_busy),
+        .m_error        (sb_error),
+        // ROM (slave 0)
+        .s0_addr        (rom_addr),
+        .s0_read        (rom_read),
+        .s0_rdata       (rom_rdata),
+        .s0_ready       (rom_ready),
+        // RAM (slave 1)
+        .s1_addr        (ram_addr),
+        .s1_wdata       (ram_wdata),
+        .s1_read        (ram_read),
+        .s1_write       (ram_write),
+        .s1_rdata       (ram_rdata),
+        .s1_ready       (ram_ready),
+        // System Control (slave 2)
+        .s2_addr        (sysctrl_addr),
+        .s2_wdata       (sysctrl_wdata),
+        .s2_read        (sysctrl_read),
+        .s2_write       (sysctrl_write),
+        .s2_rdata       (sysctrl_rdata),
+        .s2_ready       (sysctrl_ready),
+        // Disk Controller (slave 3)
+        .s3_addr        (disk_addr),
+        .s3_wdata       (disk_wdata),
+        .s3_read        (disk_read),
+        .s3_write       (disk_write),
+        .s3_rdata       (disk_rdata),
+        .s3_ready       (disk_ready),
+        // USB Controller (slave 4)
+        .s4_addr        (usb_addr),
+        .s4_wdata       (usb_wdata),
+        .s4_read        (usb_read),
+        .s4_write       (usb_write),
+        .s4_rdata       (usb_rdata),
+        .s4_ready       (usb_ready),
+        // Signal Tap (slave 5)
+        .s5_addr        (sigtap_addr),
+        .s5_wdata       (sigtap_wdata),
+        .s5_read        (sigtap_read),
+        .s5_write       (sigtap_write),
+        .s5_rdata       (sigtap_rdata),
+        .s5_ready       (sigtap_ready)
     );
 
-    //-------------------------------------------------------------------------
-    // Address Mark Detector
-    //-------------------------------------------------------------------------
-    am_detector_with_shifter u_am_detector (
-        .clk(clk),
-        .reset(reset || sw_reset),
-        .enable(cmd_read_enable),
-        .bit_in(dpll_data_bit),
-        .bit_valid(dpll_data_ready),
-        .a1_detected(am_a1_detected),
-        .c2_detected(am_c2_detected),
-        .sync_count(am_sync_count),
-        .sync_acquired(am_sync_acquired),
-        .data_byte(am_data_byte),
-        .byte_ready(am_byte_ready),
-        .raw_shift()
+    //=========================================================================
+    // System Control (simple ID register)
+    //=========================================================================
+    reg [31:0] sysctrl_id_reg;
+    initial sysctrl_id_reg = 32'hFB010100;  // FluxRipper v1.0
+
+    assign sysctrl_rdata = (sysctrl_addr == 8'h00) ? sysctrl_id_reg : 32'h0;
+    assign sysctrl_ready = 1'b1;
+
+    //=========================================================================
+    // Boot ROM (BRAM for synthesis, behavioral for simulation)
+    //=========================================================================
+    // Use distributed RAM for low-latency debug access
+    // For larger production ROM, would use external flash
+    (* ram_style = "distributed" *) reg [31:0] rom_mem [0:16383];  // 64KB
+
+    integer rom_i;
+    initial begin
+        for (rom_i = 0; rom_i < 16384; rom_i = rom_i + 1)
+            rom_mem[rom_i] = 32'hB0070000 + rom_i;
+        rom_mem[0] = 32'h13000000;  // NOP at reset vector
+    end
+
+    // Combinational read for zero-latency debug access
+    assign rom_rdata = rom_mem[rom_addr[15:2]];
+    assign rom_ready = 1'b1;
+
+    //=========================================================================
+    // Main RAM (BRAM for synthesis, behavioral for simulation)
+    //=========================================================================
+    // Use distributed RAM for low-latency debug access
+    // For larger production RAM, would use external DDR/SRAM
+    (* ram_style = "distributed" *) reg [31:0] ram_mem [0:16383];  // 64KB
+
+    integer ram_i;
+    initial begin
+        for (ram_i = 0; ram_i < 16384; ram_i = ram_i + 1)
+            ram_mem[ram_i] = 32'h5A000000 + ram_i;
+    end
+
+    // Combinational read for zero-latency debug access, registered write
+    assign ram_rdata = ram_mem[ram_addr[15:2]];
+    assign ram_ready = 1'b1;
+
+    always @(posedge clk_sys) begin
+        if (ram_write)
+            ram_mem[ram_addr[15:2]] <= ram_wdata;
+    end
+
+    //=========================================================================
+    // Disk Controller
+    //=========================================================================
+    disk_controller u_disk (
+        .clk            (clk_sys),
+        .rst_n          (sys_rst_n_int),
+        .addr           (disk_addr),
+        .wdata          (disk_wdata),
+        .read           (disk_read),
+        .write          (disk_write),
+        .rdata          (disk_rdata),
+        .ready          (disk_ready),
+        .dma_addr       (dma_addr),
+        .dma_wdata      (dma_wdata),
+        .dma_write      (dma_write),
+        .dma_ready      (1'b1),
+        .flux_in        (flux_in),
+        .index_in       (index_in),
+        .motor_on       (motor_on),
+        .head_sel       (head_sel),
+        .dir            (dir),
+        .step           (step)
     );
 
-    //-------------------------------------------------------------------------
-    // CRC Calculator
-    //-------------------------------------------------------------------------
-    crc16_ccitt u_crc (
-        .clk(clk),
-        .reset(reset || sw_reset),
-        .enable(am_byte_ready),
-        .init(cmd_crc_reset),
-        .data_in(am_data_byte),
-        .crc_out(crc_value),
-        .crc_valid(crc_valid)
+    //=========================================================================
+    // USB Controller
+    //=========================================================================
+    usb_controller u_usb (
+        .clk            (clk_sys),
+        .rst_n          (sys_rst_n_int),
+        .addr           (usb_addr),
+        .wdata          (usb_wdata),
+        .read           (usb_read),
+        .write          (usb_write),
+        .rdata          (usb_rdata),
+        .ready          (usb_ready),
+        .usb_connected  (usb_connected),
+        .usb_configured (usb_configured)
     );
 
-    //-------------------------------------------------------------------------
-    // Motor Controller
-    //-------------------------------------------------------------------------
-    motor_controller u_motor_ctrl (
-        .clk(clk),
-        .reset(reset || sw_reset),
-        .clk_freq(32'd200_000_000),
-        .motor_on_cmd(motor_on),
-        .auto_off_enable(1'b1),
-        .index_pulse(active_index),
-        .motor_running(motor_running),
-        .motor_at_speed(motor_at_speed),
-        .revolution_count()
+    //=========================================================================
+    // Signal Tap
+    //=========================================================================
+    signal_tap #(
+        .BUFFER_DEPTH(256),
+        .PROBE_WIDTH(32)
+    ) u_sigtap (
+        .clk            (clk_sys),
+        .rst_n          (sys_rst_n_int),
+        .addr           (sigtap_addr),
+        .wdata          (sigtap_wdata),
+        .read           (sigtap_read),
+        .write          (sigtap_write),
+        .rdata          (sigtap_rdata),
+        .ready          (sigtap_ready),
+        .probes         (probes)
     );
-
-    //-------------------------------------------------------------------------
-    // Drive Output Assignments
-    //-------------------------------------------------------------------------
-    // Drive 0
-    assign drv0_step       = (drive_sel == 2'b00) ? step_pulse : 1'b0;
-    assign drv0_dir        = (drive_sel == 2'b00) ? step_dir : 1'b0;
-    assign drv0_motor      = motor_running[0];
-    assign drv0_head_sel   = (drive_sel == 2'b00) ? cmd_head_select[0] : 1'b0;
-    assign drv0_write_gate = (drive_sel == 2'b00) ? cmd_write_enable : 1'b0;
-    assign drv0_write_data = 1'b0;  // Connect to write path
-
-    // Drive 1
-    assign drv1_step       = (drive_sel == 2'b01) ? step_pulse : 1'b0;
-    assign drv1_dir        = (drive_sel == 2'b01) ? step_dir : 1'b0;
-    assign drv1_motor      = motor_running[1];
-    assign drv1_head_sel   = (drive_sel == 2'b01) ? cmd_head_select[0] : 1'b0;
-    assign drv1_write_gate = (drive_sel == 2'b01) ? cmd_write_enable : 1'b0;
-    assign drv1_write_data = 1'b0;  // Connect to write path
-
-    //-------------------------------------------------------------------------
-    // Diagnostic Outputs
-    //-------------------------------------------------------------------------
-    assign pll_locked     = dpll_locked;
-    assign lock_quality   = dpll_quality;
-    assign current_track  = step_current_track;
-    assign sync_acquired  = am_sync_acquired;
-
-    //-------------------------------------------------------------------------
-    // Status LEDs
-    //-------------------------------------------------------------------------
-    assign led_activity = motor_running[drive_sel] || fdc_busy;
-    assign led_error    = st_data_error || st_missing_am || st_no_data;
 
 endmodule

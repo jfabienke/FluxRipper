@@ -1,6 +1,6 @@
 # FluxRipper System Architecture
 
-*Updated: 2025-12-03 23:50*
+*Updated: 2025-12-07 12:16*
 
 ## Overview
 
@@ -16,8 +16,9 @@ The Universal card design provides multiple host interfaces on a single PCB:
 | Interface | Edge/Connector | Protocol | Use Case |
 |-----------|----------------|----------|----------|
 | **ISA** | Edge connector | ISA bus (3F0-3F7, DMA, IRQ) | Retro PC restoration |
-| **PCIe** | Edge connector | PCIe x1 BAR0, MSI-X | Modern PC integration |
-| **USB-C** | USB-C receptacle | FT232H (CDC/Bulk) | Cross-platform tool |
+| **USB 2.0 HS** | USB-C receptacle | ULPI PHY (480 Mbps) | Cross-platform tool (primary) |
+
+**Note:** PCIe removed from design—XCSU35P has 0 GTH transceivers. USB 2.0 HS is the sole high-speed host interface.
 
 ### Universal Card Peripherals
 | Component | Interface | Purpose |
@@ -72,22 +73,24 @@ The onboard RTC is exposed as an AT-compatible MC146818 RTC for legacy systems:
 │                                            │  └───────────┬────────────┘  │ │
 │                                            └──────────────┼───────────────┘ │
 │                                                           │                 │
-│  ┌────────────────────────────────────────────────────────┼───────────────┐ │
-│  │                        FDC Data Path                   │               │ │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┼─┐              │ │
-│  │  │  Step    │  │   DPLL   │  │ Encoding │  │  Signal  │ │              │ │
-│  │  │Controller│  │ (6 sub)  │  │ MFM/FM/  │  │ Quality  │ │              │ │
-│  │  │          │  │          │  │   GCR    │  │ Monitor  │ │              │ │
-│  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────────┘ │              │ │
-│  │       │             │             │                     │              │ │
-│  │  ┌────▼─────┐  ┌────▼─────┐  ┌────▼─────┐  ┌───────────▼─┐             │ │
-│  │  │  Motor   │  │    AM    │  │   CRC    │  │Write Precomp│             │ │
-│  │  │Controller│  │ Detector │  │  CCITT   │  │             │             │ │
-│  │  └────┬─────┘  └────┬─────┘  └──────────┘  └──────┬──────┘             │ │
-│  │       │             │                             │                    │ │
-│  └───────┼─────────────┼─────────────────────────────┼────────────────────┘ │
-│          │             │                             │                      │
-│          ▼             ▼                             ▼                      │
+│                                                           ▼                 │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                        FDC Data Path                                  │  │
+│  │                                                                       │  │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐               │  │
+│  │  │  Step    │  │   DPLL   │  │ Encoding │  │  Signal  │               │  │
+│  │  │Controller│  │ (6 sub)  │  │ MFM/FM/  │  │ Quality  │               │  │
+│  │  │          │  │          │  │   GCR    │  │ Monitor  │               │  │
+│  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘               │  │
+│  │       │             │             │             │                     │  │
+│  │  ┌────▼─────┐  ┌────▼─────┐  ┌────▼─────┐  ┌────▼────────┐            │  │
+│  │  │  Motor   │  │    AM    │  │   CRC    │  │Write Precomp│            │  │
+│  │  │Controller│  │ Detector │  │  CCITT   │  │             │            │  │
+│  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬──────┘            │  │
+│  │       │             │             │               │                   │  │
+│  └───────┼─────────────┼─────────────┼───────────────┼───────────────────┘  │
+│          │             │             │               │                      │
+│          ▼             ▼             ▼               ▼                      │
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
 │  │                    Drive Interface (via Level Shifters)              │   │
 │  │   STEP │ DIR │ MOTOR │ HEAD_SEL │ WRITE_GATE │ WRITE_DATA │ RD       │   │
@@ -113,41 +116,41 @@ The onboard RTC is exposed as an AT-compatible MC146818 RTC for legacy systems:
 │                    FluxRipper Dual-FDC SoC (XCSU35P)                        │
 │                                                                             │
 │  ┌──────────────────┐                                                       │
-│  │   MicroBlaze V   │◄───── AXI4-Lite ─────┬──────────────────────────────┐ │
-│  │    (RISC-V)      │                      │                              │ │
-│  └────────┬─────────┘                      ▼                              │ │
-│           │ AXI4              ┌────────────────────────┐                  │ │
-│           │                   │  AXI FDC Peripheral    │                  │ │
-│           │                   │  (Dual Interface Regs) │                  │ │
-│           │                   │  0x00-0x2C: Standard   │                  │ │
-│           │                   │  0x30-0x58: Dual Ext   │                  │ │
-│           │                   └───────────┬────────────┘                  │ │
-│           │                               │                               │ │
-│  ┌────────┴─────────┐         ┌───────────┴────────────┐                  │ │
-│  │   AXI DMA (2ch)  │         │    Dual FDC Core       │                  │ │
-│  │   Controller     │         │                        │                  │ │
-│  └────────┬─────────┘         │  ┌──────┐  ┌──────┐    │                  │ │
-│           │                   │  │FDC A │  │FDC B │    │                  │ │
-│           │ AXI-Stream (2x)   │  │Drv0/1│  │Drv2/3│    │                  │ │
-│           │◄──────────────────│  └──┬───┘  └──┬───┘    │                  │ │
-│           │                   │     │         │        │                  │ │
-│           ▼                   └─────┼─────────┼────────┘                  │ │
-│  ┌──────────────────┐               │         │                           │ │
-│  │   HyperRAM       │               │         │                           │ │
-│  │   Controller     │               │         │                           │ │
-│  │   (8MB buffer)   │               │         │                           │ │
-│  └──────────────────┘               │         │                           │ │
-└─────────────────────────────────────┼─────────┼───────────────────────────┘ │
-                                      │         │                             │
-                        ┌─────────────┴───┐ ┌───┴─────────────┐               │
-                        │  Level Shifter  │ │  Level Shifter  │               │
-                        │  (Header 1)     │ │  (Header 2)     │               │
-                        └────────┬────────┘ └────────┬────────┘               │
-                                 │                   │                        │
-                        ┌────────┴────────┐ ┌────────┴────────┐               │
-                        │ 34-pin Shugart  │ │ 34-pin Shugart  │               │
-                        │ Drives 0 & 1    │ │ Drives 2 & 3    │               │
-                        └─────────────────┘ └─────────────────┘               │
+│  │   MicroBlaze V   │◄───── AXI4-Lite ─────┐                                │
+│  │    (RISC-V)      │                      │                                │
+│  └────────┬─────────┘                      ▼                                │
+│           │ AXI4              ┌────────────────────────┐                    │
+│           │                   │  AXI FDC Peripheral    │                    │
+│           │                   │  (Dual Interface Regs) │                    │
+│           │                   │  0x00-0x2C: Standard   │                    │
+│           │                   │  0x30-0x58: Dual Ext   │                    │
+│           │                   └───────────┬────────────┘                    │
+│           │                               │                                 │
+│  ┌────────┴─────────┐         ┌───────────┴────────────┐                    │
+│  │   AXI DMA (2ch)  │         │    Dual FDC Core       │                    │
+│  │   Controller     │         │                        │                    │
+│  └────────┬─────────┘         │  ┌──────┐  ┌──────┐    │                    │
+│           │                   │  │FDC A │  │FDC B │    │                    │
+│           │ AXI-Stream (2x)   │  │Drv0/1│  │Drv2/3│    │                    │
+│           │◄──────────────────│  └──┬───┘  └──┬───┘    │                    │
+│           │                   │     │         │        │                    │
+│           ▼                   └─────┼─────────┼────────┘                    │
+│  ┌──────────────────┐               │         │                             │
+│  │   HyperRAM       │               │         │                             │
+│  │   Controller     │               │         │                             │
+│  │   (8MB buffer)   │               │         │                             │
+│  └──────────────────┘               │         │                             │
+└─────────────────────────────────────┼─────────┼─────────────────────────────┘
+                                      │         │                             
+                        ┌─────────────┴───┐ ┌───┴─────────────┐               
+                        │  Level Shifter  │ │  Level Shifter  │               
+                        │  (Header 1)     │ │  (Header 2)     │              
+                        └────────┬────────┘ └────────┬────────┘               
+                                 │                   │                        
+                        ┌────────┴────────┐ ┌────────┴────────┐               
+                        │ 34-pin Shugart  │ │ 34-pin Shugart  │               
+                        │ Drives 0 & 1    │ │ Drives 2 & 3    │               
+                        └─────────────────┘ └─────────────────┘               
 ```
 
 ### Dual Interface Features
@@ -168,32 +171,32 @@ The onboard RTC is exposed as an AT-compatible MC146818 RTC for legacy systems:
    │  CPU   │◄─────────►│  │              FDC Register Interface          │   │
    │ (Host) │  ISA Bus  │  │    DOR │ DSR │ MSR │ DIR │ CCR │ FIFO        │   │
    └────────┘           │  └───────────────────┬──────────────────────────┘   │
-                        │                      │                              │
-                        │  ┌───────────────────▼──────────────────────────┐   │
-                        │  │              Command FSM                     │   │
-                        │  │   Type 1 │ Type 2 │ Type 3 │ Type 4          │   │
-                        │  └────┬─────────┬────────────┬──────────────────┘   │
-                        │       │         │            │                      │
-         ┌──────────────┼───────┼─────────┼────────────┼───────────────────┐  │
-         │              │       ▼         ▼            ▼                   │  │
-         │  ┌───────────┴──┐ ┌─────────┐ ┌─────────┐ ┌─────────┐           │  │
-         │  │    Step      │ │  Read   │ │  Write  │ │   AM    │           │  │
-         │  │  Controller  │ │  Path   │ │  Path   │ │Detector │           │  │
-         │  │              │ │         │ │         │ │         │           │  │
-         │  │ Double-Step  │ │  Data   │ │ Precomp │ │ A1/C2   │           │  │
-         │  └──────┬───────┘ │Separator│ │         │ │ Sync    │           │  │
-         │         │         └────┬────┘ └────┬────┘ └────┬────┘           │  │
-         │         │              │           │           │                │  │
-         │  ┌──────▼───────┐ ┌────▼────┐ ┌────▼────┐ ┌────▼────┐           │  │
-         │  │   Motor      │ │  DPLL   │ │  MFM    │ │  CRC    │           │  │
-         │  │  Controller  │ │         │ │Encoder  │ │ CCITT   │           │  │
-         │  └──────┬───────┘ └────┬────┘ └────┬────┘ └─────────┘           │  │
-         │         │              │           │                            │  │
-         └─────────┼──────────────┼───────────┼────────────────────────────┘  │
-                   │              │           │                               │
-                   ▼              ▼           ▼                               │
-            ┌──────────────────────────────────────┐                          │
-            │         Drive Interface              │◄─────────────────────────┘
+                                               │                           
+                           ┌───────────────────▼──────────────────────────┐
+                           │              Command FSM                     │
+                           │   Type 1 │ Type 2 │ Type 3 │ Type 4          │
+                           └────┬─────────┬────────────┬──────────────────┘
+                                │         │            │                    
+         ┌──────────────────────┼─────────┼────────────┼───────────────────┐
+         │                      ▼         ▼            ▼                   │
+         │  ┌──────────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐           │
+         │  │    Step      │ │  Read   │ │  Write  │ │   AM    │           │
+         │  │  Controller  │ │  Path   │ │  Path   │ │Detector │           │
+         │  │              │ │         │ │         │ │         │           │
+         │  │ Double-Step  │ │  Data   │ │ Precomp │ │ A1/C2   │           │
+         │  └──────┬───────┘ │Separator│ │         │ │ Sync    │           │
+         │         │         └────┬────┘ └────┬────┘ └────┬────┘           │
+         │         │              │           │           │                │
+         │  ┌──────▼───────┐ ┌────▼────┐ ┌────▼────┐ ┌────▼────┐           │
+         │  │   Motor      │ │  DPLL   │ │  MFM    │ │  CRC    │           │
+         │  │  Controller  │ │         │ │Encoder  │ │ CCITT   │           │
+         │  └──────┬───────┘ └────┬────┘ └────┬────┘ └─────────┘           │
+         │         │              │           │                            │
+         └─────────┼──────────────┼───────────┼────────────────────────────┘
+                   │              │           │                               
+                   ▼              ▼           ▼                               
+            ┌──────────────────────────────────────┐                          
+            │         Drive Interface              │
             │  STEP │ DIR │ MOTOR │ WG │ WD │ RD   │
             └──────────────────────────────────────┘
                               │
@@ -599,6 +602,125 @@ FluxRipper implements the Intel 82077AA-1 floppy disk controller interface with 
 - PERPENDICULAR MODE (0x12) not implemented
 - Extended registers at 0x18-0x2C for flux capture and diagnostics
 - VERSION command returns 0x90 (82077AA compatible)
+
+## JTAG Debug Subsystem Architecture
+
+The FluxRipper includes a complete RISC-V Debug Module 0.13-compliant JTAG debug subsystem for hardware bring-up and diagnostics.
+
+### Debug Block Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         FluxRipper Debug Subsystem                          │
+│                                                                             │
+│  ┌──────────────────┐                      ┌──────────────────────────────┐ │
+│  │  JTAG Connector  │                      │       System Bus Fabric      │ │
+│  │  (TCK,TMS,TDI,   │                      │                              │ │
+│  │   TDO,TRST)      │                      │  ROM    RAM    Peripherals   │ │
+│  └────────┬─────────┘                      └──────────────┬───────────────┘ │
+│           │                                               ▲                 │
+│           ▼                                               │                 │
+│  ┌──────────────────┐    IR/DR     ┌──────────────────┐   │                 │
+│  │  TAP Controller  │──────────────│  Debug Transport │   │                 │
+│  │  (IEEE 1149.1)   │              │  Module (DTM)    │   │                 │
+│  │                  │              │                  │   │                 │
+│  │  IDCODE: 0xFB010001             │  DTMCS, DMI      │   │                 │
+│  │  IR: 5-bit       │              │  Registers       │   │                 │
+│  └──────────────────┘              └────────┬─────────┘   │                 │
+│                                             │             │                 │
+│                                    ┌────────▼─────────┐   │                 │
+│                                    │  Debug Module    │───┘                 │
+│                                    │  (RISC-V DM 0.13)│                     │
+│                                    │                  │                     │
+│                                    │  sbcs, sbaddr,   │                     │
+│                                    │  sbdata          │                     │
+│                                    └──────────────────┘                     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Debug Module Hierarchy
+
+```
+fluxripper_top
+├── jtag_tap_controller          # IEEE 1149.1 TAP
+│   ├── 16-state FSM             # Test-Logic-Reset → Run-Test-Idle → ...
+│   ├── IDCODE (0xFB010001)      # FluxRipper v1 identifier
+│   ├── BYPASS                   # Single-bit bypass register
+│   └── 5-bit IR                 # Instruction register
+├── jtag_dtm                     # Debug Transport Module
+│   ├── DTMCS (IR=0x10)          # Control/Status register
+│   ├── DMI Access (IR=0x11)     # Debug Module Interface
+│   └── 41-bit shift register    # addr[7]+data[32]+op[2]
+├── debug_module                 # RISC-V Debug Module 0.13
+│   ├── DMI register interface   # 128 registers
+│   ├── System bus master        # Memory access
+│   └── Abstract commands        # (placeholder)
+├── system_bus                   # Address decoder + arbiter
+│   ├── Slave 0: ROM             # 0x0000_0000 - 0x0FFF_FFFF
+│   ├── Slave 1: RAM             # 0x1000_0000 - 0x1FFF_FFFF
+│   ├── Slave 2: SYSCTRL         # 0x4000_0000
+│   ├── Slave 3: Disk Controller # 0x4001_0000
+│   ├── Slave 4: USB Controller  # 0x4002_0000
+│   └── Slave 5: Signal Tap      # 0x4003_0000
+└── clock_reset_mgr              # Clock generation + reset sync
+    ├── MMCME4_BASE (synthesis)  # 25→100/48/50 MHz
+    ├── Behavioral (simulation)  # Toggle-based clocks
+    ├── Reset synchronizers      # Per-domain
+    └── Watchdog timer           # System health
+```
+
+### DMI Protocol
+
+The Debug Module Interface (DMI) uses a 41-bit shift register:
+
+```
+┌───────────────┬───────────────────────────────────┬─────────┐
+│  addr [40:34] │           data [33:2]             │ op [1:0]│
+│    7 bits     │             32 bits               │  2 bits │
+└───────────────┴───────────────────────────────────┴─────────┘
+
+op values:
+  00 = NOP
+  01 = Read
+  10 = Write
+  11 = Reserved
+
+Response status (in op field on read-back):
+  00 = Success
+  01 = Reserved
+  10 = Failed
+  11 = Busy
+```
+
+### Memory Map (via Debug Module)
+
+| Address Range | Size | Description |
+|---------------|------|-------------|
+| 0x0000_0000 - 0x0FFF_FFFF | 256 MB | Boot ROM (64 KB implemented) |
+| 0x1000_0000 - 0x1FFF_FFFF | 256 MB | Main RAM (64 KB implemented) |
+| 0x4000_0000 - 0x4000_00FF | 256 B | System Control |
+| 0x4001_0000 - 0x4001_00FF | 256 B | Disk Controller |
+| 0x4002_0000 - 0x4002_00FF | 256 B | USB Controller |
+| 0x4003_0000 - 0x4003_00FF | 256 B | Signal Tap |
+
+### Simulation Validation Status
+
+All debug subsystem layers have been validated in simulation:
+
+| Layer | Module | Tests | Status |
+|-------|--------|-------|--------|
+| 0 | TAP Controller | 9 | ✅ Pass |
+| 1 | DTM | 5 | ✅ Pass |
+| 2 | Debug Module | 6 | ✅ Pass |
+| 3 | System Bus | 7 | ✅ Pass |
+| 4 | Clock/Reset | 5 | ✅ Pass |
+| 5 | Peripherals | 8 | ✅ Pass |
+| 6 | Full System | 12 | ✅ Pass |
+
+See [SIMULATION_LAYERS.md](SIMULATION_LAYERS.md) for detailed test descriptions.
+
+---
 
 ## CAPSImg Source Mapping
 

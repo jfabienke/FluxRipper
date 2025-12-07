@@ -2,7 +2,7 @@
 
 *FluxRipper vs KryoFlux vs GreaseWeazle vs SuperCard Pro*
 
-*Updated: 2025-12-03 23:58*
+*Updated: 2025-12-04 12:50*
 
 ---
 
@@ -12,7 +12,7 @@
 |---------|----------------------|----------|--------------|---------------|
 | **Price** | ~$99 (retail @ 1K)† | ~$100-150 | ~$35-50 | ~$100 |
 | **Open Source** | Yes (RTL+SW) | No (closed) | Yes (FW+SW) | Partial (SW open) |
-| **Interface** | ISA/PCIe/USB-C | USB | USB | USB/Serial |
+| **Interface** | ISA/USB 2.0 HS | USB | USB | USB/Serial |
 | **FPGA-based** | Yes | Yes (ARM+FPGA) | No (MCU) | No (MCU) |
 | **Real-time decode** | Yes | No | No | No |
 | **FDC replacement** | ✅ 82077AA / ISA / AXI | ❌ Host USB only | ❌ Host USB only | ❌ Host USB only |
@@ -46,13 +46,13 @@
 
 | Specification | FluxRipper Universal | KryoFlux | GreaseWeazle V4 | SuperCard Pro |
 |---------------|----------------------|----------|-----------------|---------------|
-| **Processor** | Artix-7 FPGA + MicroBlaze V | ARM + FPGA | STM32F730 MCU | PIC24 MCU |
+| **Processor** | Spartan UltraScale+ FPGA + MicroBlaze V | ARM + FPGA | STM32F730 MCU | PIC24 MCU |
 | **Clock/Resolution** | 200 MHz / 5ns | ~24 MHz / ~41ns | ~72 MHz / ~14ns | 40 MIPS / 25ns |
 | **RAM** | HyperRAM 8MB | Internal | Internal | 512KB SRAM |
-| **Host Interface** | ISA / PCIe / USB-C | USB 2.0 | USB 2.0 | USB / Serial |
+| **Host Interface** | ISA / USB 2.0 HS | USB 2.0 | USB 2.0 | USB / Serial |
 | **Floppy Interface** | Dual 34-pin + 50-pin | Single 34-pin | Single 34-pin | Single 34-pin |
 | **Drives per interface** | 2 (4 total) | 2 | 2-3 | 2 |
-| **Power** | ISA/PCIe/USB-C/ATX | USB + external | USB + external | USB + external |
+| **Power** | ISA/USB-C/ATX | USB + external | USB + external | USB + external |
 | **+24V for 8" drives** | Yes (onboard boost) | No (external) | No (external) | No (external) |
 | **Buffered outputs** | Yes (74AHCT) | Yes | Yes (V4) | Yes |
 | **Write protect jumper** | Yes | No | Yes | No |
@@ -334,7 +334,7 @@
 
 | Feature | Description |
 |---------|-------------|
-| **Triple host interface** | ISA (8/16-bit) + PCIe x1 + USB-C on single PCB |
+| **Dual host interface** | ISA (8/16-bit) + USB 2.0 HS on single PCB |
 | **ISA Plug and Play** | Auto-configuration with 4 logical devices (FDC A, FDC B, Extensions, RTC) |
 | **ISA Real-Time Clock** | MC146818-compatible RTC at 0x70-0x71 for XT clones without built-in clock |
 | **MicroSD storage** | Store 1000+ disk images for standalone operation |
@@ -352,7 +352,7 @@
 | **Native 8" signals** | HEAD_LOAD, /TG43, /SECTOR, DENSITY on dedicated GPIO |
 | **Zone NCO (Mac GCR)** | Hardware variable-speed decode — no software post-processing |
 | **Hard-sector native** | /SECTOR input with automatic flux stream tagging (bit 29) |
-| **AXI interface** | Direct SoC/PCIe integration, embedded Linux, no USB overhead |
+| **AXI interface** | Direct SoC integration, embedded Linux, no USB overhead |
 | **Resto-mod ready** | Designed to host experimental neo-floppy formats with heavy ECC |
 
 ### KryoFlux Exclusive

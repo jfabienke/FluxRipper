@@ -1,6 +1,6 @@
 # FluxRipper FPGA Documentation
 
-*Updated: 2025-12-03 23:45*
+*Updated: 2025-12-07 12:16*
 
 ## Overview
 
@@ -20,9 +20,10 @@ The FluxRipper Universal is a multi-host PCB design that functions as:
 | Mode | Power Source | Host Interface | Use Case |
 |------|--------------|----------------|----------|
 | **ISA Card** | ISA bus +5V/+12V | ISA (3F0-3F7, DMA, IRQ) | Retro PC restoration |
-| **PCIe Card** | PCIe slot +3.3V/+12V | PCIe BAR0, MSI-X | Modern PC integration |
-| **USB Device** | USB-C (host) | USB CDC/Bulk | Cross-platform tool |
+| **USB Device** | USB-C (host) | USB 2.0 HS (480 Mbps) | Cross-platform tool (primary) |
 | **Standalone** | USB-C PD (charger) | USB serial console | Portable disk utility |
+
+**Note:** PCIe removed—XCSU35P has 0 GTH transceivers. USB 2.0 HS via ULPI PHY is the primary high-speed interface.
 
 ### Universal Card Features
 
@@ -37,7 +38,23 @@ The FluxRipper Universal is a multi-host PCB design that functions as:
 
 ## Project Status
 
-**HDL Implementation: ~95% Complete** (without hardware testing)
+**HDL Implementation: ~98% Complete**
+**Simulation: ✅ ALL LAYERS VALIDATED** (Layers 0-6)
+**Hardware: 🔜 Ready for FPGA Bring-Up**
+
+### Simulation Validation Summary
+
+| Layer | Component | Tests | Status |
+|-------|-----------|-------|--------|
+| 0 | JTAG TAP Controller | 9 | ✅ Pass |
+| 1 | Debug Transport Module | 5 | ✅ Pass |
+| 2 | Debug Module + Memory | 6 | ✅ Pass |
+| 3 | System Bus Fabric | 7 | ✅ Pass |
+| 4 | Clock/Reset Manager | 5 | ✅ Pass |
+| 5 | Peripheral Subsystems | 8 | ✅ Pass |
+| 6 | Full System Integration | 12 | ✅ Pass |
+
+All testbenches run with Icarus Verilog. See [SIMULATION_LAYERS.md](SIMULATION_LAYERS.md) for details.
 
 ### Implemented Modules
 
@@ -130,7 +147,7 @@ rtl/
 ├── top/               # Top-level integration
 │   ├── fluxripper_top.v         # Single-interface top
 │   ├── fluxripper_dual_top.v    # Dual-interface top (4 drives)
-│   └── fluxripper_universal_top.v # Universal card top (ISA/PCIe/USB)
+│   └── fluxripper_universal_top.v # Universal card top (ISA/USB)
 ├── fdc_core/          # Command FSM, registers
 │   ├── command_fsm.v            # FDC command state machine
 │   ├── fdc_registers.v          # 82077AA register interface
@@ -232,15 +249,62 @@ rtl/axi/
 | HyperRAM Controller (est.) | 400 | 200 | 0 | 0 |
 | **Subtotal (SoC)** | **~5,600** | **~3,050** | **~20** | **3** |
 
-### Total (Dual-FDC SCU35)
+### HDD Support Modules (ST-506/ESDI)
+| Block | LUTs | FFs | BRAM (18Kb) | DSP |
+|-------|------|-----|-------------|-----|
+| Clock Wizard HDD (300 MHz) | 50 | 30 | 0 | 0 |
+| NCO HDD | 150 | 80 | 0 | 0 |
+| RLL(2,7) Encoder | 180 | 60 | 2 | 0 |
+| RLL(2,7) Decoder | 200 | 80 | 2 | 0 |
+| ESDI Encoder | 220 | 90 | 2 | 0 |
+| ESDI Decoder | 280 | 120 | 2 | 0 |
+| ST-506 Interface | 180 | 100 | 0 | 0 |
+| HDD Seek Controller | 200 | 120 | 0 | 0 |
+| ESDI PHY | 250 | 100 | 0 | 0 |
+| HDD Discovery FSM | 350 | 200 | 0 | 0 |
+| HDD Rate Detector | 200 | 100 | 1 | 0 |
+| HDD Geometry Scanner | 300 | 150 | 0 | 0 |
+| HDD Health Monitor | 220 | 100 | 0 | 0 |
+| HDD PHY Probe | 180 | 80 | 0 | 0 |
+| **Subtotal (HDD)** | **~2,960** | **~1,410** | **~9** | **0** |
+
+### Phase 0 Interface Detection
+| Block | LUTs | FFs | BRAM (18Kb) | DSP |
+|-------|------|-----|-------------|-----|
+| Interface Detector FSM | 280 | 150 | 0 | 0 |
+| Data Path Sniffer | 250 | 120 | 0 | 0 |
+| Correlation Calculator | 160 | 80 | 0 | 0 |
+| Signal Quality Scorer | 200 | 100 | 0 | 0 |
+| Index Frequency Counter | 120 | 60 | 0 | 0 |
+| **Subtotal (Detection)** | **~1,010** | **~510** | **0** | **0** |
+
+### FluxStat Recovery Modules
+| Block | LUTs | FFs | BRAM (18Kb) | DSP |
+|-------|------|-----|-------------|-----|
+| Flux Histogram (256 bins) | 200 | 120 | 2 | 0 |
+| Multipass Capture FSM | 280 | 180 | 1 | 0 |
+| **Subtotal (FluxStat)** | **~480** | **~300** | **~3** | **0** |
+
+### Total (Full System - Dual-FDC + HDD + FluxStat)
 | Resource | Used | Available | Utilization |
 |----------|------|-----------|-------------|
-| LUTs | ~10,350 | 36,000 | ~28.7% |
-| FFs | ~5,800 | 36,000 | ~16.1% |
-| BRAM (18Kb eq.) | ~54 | 106 | ~51% |
+| LUTs | ~14,800 | 36,000 | ~41.1% |
+| FFs | ~8,020 | 36,000 | ~22.3% |
+| BRAM (18Kb eq.) | ~68 | 106 | ~64.2% |
 | DSP | 6 | 48 | ~12.5% |
 
-*Headroom: 71% LUTs, 84% FFs, 49% BRAM, 87.5% DSP remaining for future enhancements.*
+*Headroom: 59% LUTs, 78% FFs, 36% BRAM, 87.5% DSP remaining for future enhancements.*
+
+### Resource Summary by Feature
+| Configuration | LUTs | FFs | BRAM | Notes |
+|--------------|------|-----|------|-------|
+| Floppy-only (Dual FDC) | ~10,350 | ~5,800 | ~54 | Base configuration |
+| + HDD Support | +2,960 | +1,410 | +9 | ST-506/ESDI |
+| + Interface Detection | +1,010 | +510 | +0 | Phase 0 auto-detect |
+| + FluxStat | +480 | +300 | +3 | Statistical recovery |
+| **Full System** | **~14,800** | **~8,020** | **~68** | All features enabled |
+
+*All estimates based on AMD Spartan UltraScale+ (XCSU35P-2SBVB625E) with 36K Logic Cells.*
 
 ## Quick Start
 
@@ -254,14 +318,38 @@ make sim_crc       # CRC verification
 make sim_top       # Top-level integration
 make sim_axi       # AXI infrastructure tests
 make lint          # Verilator lint check
+
+# Layer-by-layer simulation
+cd sim/layer6 && make   # Full system test (12 tests)
 ```
 
-### Synthesis (Vivado)
+### Synthesis (Vivado CLI)
+
+The project includes TCL scripts for fully automated synthesis:
+
+```bash
+# 1. Update pin constraints for your board
+vim soc/constraints/fluxripper_pinout.xdc
+
+# 2. Run synthesis (creates bitstream)
+cd soc
+vivado -mode batch -source scripts/synth_fluxripper.tcl
+
+# 3. Program FPGA
+vivado -mode batch -source scripts/program_fpga.tcl
+
+# 4. Verify JTAG connectivity
+openocd -f debug/openocd_fluxripper.cfg -c "init; fluxripper_test; shutdown"
+```
+
+See [BRINGUP_GUIDE.md](BRINGUP_GUIDE.md) for detailed hardware bring-up procedures.
+
+### Synthesis (Vivado GUI)
 1. Open Vivado 2024.1 or later (for SCU35 support)
 2. Create new project for Spartan UltraScale+ (xcsu35p-2sbvb625e)
 3. Add all RTL files from `rtl/` subdirectories including `rtl/axi/`
-4. Add constraints from `constraints/scu35_pinout.xdc`
-5. Configure MicroBlaze V soft core via Block Design
+4. Add constraints from `soc/constraints/`
+5. Define `XILINX_FPGA` to enable MMCM primitives
 6. Run synthesis and implementation
 
 ## Supported Disk Formats

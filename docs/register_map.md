@@ -1,6 +1,6 @@
 # FluxRipper Register Map
 
-*Updated: 2025-12-03 23:55*
+*Updated: 2025-12-08 00:35*
 
 ## Intel 82077AA Compatible Registers
 
@@ -982,3 +982,172 @@ The FluxRipper Universal card exposes its onboard PCF8563 RTC as an **AT-compati
 | PWR_RAILS | 0x90 | +5V voltage [15:0], +12V voltage [31:16] |
 | PWR_24V | 0x94 | +24V voltage [15:0], +24V current [31:16] |
 | PWR_ALERTS | 0x98 | Over-current/under-voltage flags |
+
+---
+
+## JTAG Debug Subsystem Registers
+
+The FluxRipper debug subsystem provides JTAG-accessible registers for hardware bring-up and diagnostics.
+
+### JTAG TAP Controller
+
+| IR Value | Register | Width | Description |
+|----------|----------|-------|-------------|
+| 0x00 | EXTEST | N/A | External test (not implemented) |
+| 0x01 | IDCODE | 32 | Device identification |
+| 0x10 | DTMCS | 32 | Debug Transport Module Control/Status |
+| 0x11 | DMI | 41 | Debug Module Interface access |
+| 0x1F | BYPASS | 1 | Bypass register |
+
+### IDCODE (IR=0x01)
+
+**Value:** 0xFB010001
+
+```
+┌────────────────┬────────────────┬────────────────┬────┐
+│   Version [4]  │   Part [16]    │   Manuf [11]   │ 1  │
+│    0xF (15)    │   0xB010       │    0x000       │    │
+└────────────────┴────────────────┴────────────────┴────┘
+```
+
+| Field | Bits | Value | Description |
+|-------|------|-------|-------------|
+| Version | 31:28 | 0xF | FluxRipper version 1 |
+| Part Number | 27:12 | 0xB010 | FluxRipper JTAG debug |
+| Manufacturer | 11:1 | 0x000 | Unassigned (non-commercial) |
+| LSB | 0 | 1 | Required by IEEE 1149.1 |
+
+### DTMCS - Debug Transport Module Control/Status (IR=0x10)
+
+| Bits | Name | Access | Description |
+|------|------|--------|-------------|
+| 31:18 | Reserved | R | Always 0 |
+| 17 | dmihardreset | W | Hard reset DMI |
+| 16 | dmireset | W | Clear DMI error state |
+| 15 | Reserved | R | Always 0 |
+| 14:12 | idle | R | Idle cycles required (0x1 = 1 cycle) |
+| 11:10 | dmistat | R | DMI status (0=ok, 2=failed, 3=busy) |
+| 9:4 | abits | R | Address bits (0x07 = 7 bits) |
+| 3:0 | version | R | DTM version (0x1 = v0.13) |
+
+**Read value:** 0x00001071 (idle=1, abits=7, version=1)
+
+### DMI - Debug Module Interface (IR=0x11)
+
+41-bit shift register for Debug Module access:
+
+```
+┌───────────────┬───────────────────────────────────┬─────────┐
+│  addr [40:34] │           data [33:2]             │ op [1:0]│
+│    7 bits     │             32 bits               │  2 bits │
+└───────────────┴───────────────────────────────────┴─────────┘
+```
+
+**Operation codes (op):**
+| Value | Direction | Meaning |
+|-------|-----------|---------|
+| 00 | Write | NOP - no operation |
+| 01 | Write | Read from addr |
+| 10 | Write | Write data to addr |
+| 11 | Write | Reserved |
+| 00 | Read | Success |
+| 01 | Read | Reserved |
+| 10 | Read | Failed |
+| 11 | Read | Busy |
+
+### Debug Module Registers (via DMI)
+
+#### System Bus Access Registers
+
+| Addr | Name | Access | Description |
+|------|------|--------|-------------|
+| 0x38 | sbcs | R/W | System Bus Control/Status |
+| 0x39 | sbaddress0 | R/W | System Bus Address [31:0] |
+| 0x3C | sbdata0 | R/W | System Bus Data [31:0] |
+
+#### sbcs - System Bus Control/Status (DMI 0x38)
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 31:29 | sbversion | System bus version (1) |
+| 22 | sbbusyerror | Busy error (W1C) |
+| 21 | sbbusy | Bus operation in progress |
+| 20 | sbreadonaddr | Auto-read on address write |
+| 19:17 | sbaccess | Access size (2=32-bit) |
+| 16 | sbautoincrement | Auto-increment address |
+| 15 | sbreadondata | Auto-read on data read |
+| 14:12 | sberror | Error code (W1C) |
+| 11:5 | sbasize | Address size (32) |
+| 4:0 | sbaccess128-8 | Supported access sizes |
+
+**Typical configuration for 32-bit access:**
+- Write 0x00000404 to enable 32-bit access with read-on-addr
+
+### Peripheral Registers (via System Bus)
+
+#### System Control (Base: 0x4000_0000)
+
+| Offset | Name | Access | Description |
+|--------|------|--------|-------------|
+| 0x00 | SYSCTRL_ID | R | System ID: 0xFB010100 |
+
+#### Disk Controller (Base: 0x4001_0000)
+
+| Offset | Name | Access | Description |
+|--------|------|--------|-------------|
+| 0x00 | DISK_ID | R | Disk controller ID |
+| 0x04 | DISK_CTRL | R/W | Control: [2]=motor_on, [1]=head_sel, [0]=enabled |
+| 0x08 | DISK_STATUS | R | Status: [1]=index, [0]=flux_in |
+| 0x0C | DISK_DMA | R/W | DMA control |
+| 0x10 | DISK_INDEX_CNT | R | Index pulse counter |
+
+#### USB Controller (Base: 0x4002_0000)
+
+| Offset | Name | Access | Description |
+|--------|------|--------|-------------|
+| 0x00 | USB_ID | R | USB controller ID: 0x05B20001 |
+| 0x04 | USB_STATUS | R | Status: [1]=configured, [0]=connected |
+| 0x08 | USB_CTRL | R/W | Control: [1]=configured_en, [0]=connected_en |
+
+#### Signal Tap (Base: 0x4003_0000)
+
+| Offset | Name | Access | Description |
+|--------|------|--------|-------------|
+| 0x00 | SIGTAP_ID | R | Signal Tap ID: 0x51670001 |
+| 0x04 | SIGTAP_STATUS | R | Status: [3]=triggered, [2]=full, [1]=running, [0]=armed |
+| 0x08 | SIGTAP_CTRL | R/W | Control: [0]=arm |
+| 0x0C | SIGTAP_TRIG_VAL | R/W | Trigger value |
+| 0x10 | SIGTAP_TRIG_MASK | R/W | Trigger mask |
+| 0x14 | SIGTAP_WRITE_PTR | R | Write pointer |
+| 0x40-0x7F | SIGTAP_BUFFER | R | Captured probe data (256 entries) |
+
+### JTAG Access Examples
+
+#### Read IDCODE via OpenOCD
+```tcl
+irscan fluxripper.tap 0x01
+drscan fluxripper.tap 32 0
+# Returns: fb010001
+```
+
+#### Read System Control ID via Debug Module
+```tcl
+# Select DMI register
+irscan fluxripper.tap 0x11
+
+# Configure sbcs for 32-bit read-on-addr
+# addr=0x38, data=0x00000404, op=write(2)
+drscan fluxripper.tap 41 0x1C000002024
+
+# Write target address to sbaddress0
+# addr=0x39, data=0x40000000, op=write(2)
+drscan fluxripper.tap 41 0x1C800000002
+
+# Read result from sbdata0
+# addr=0x3C, data=0, op=read(1)
+drscan fluxripper.tap 41 0x1E000000001
+
+# Shift out result
+drscan fluxripper.tap 41 0
+# data field contains 0xFB010100
+```

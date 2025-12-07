@@ -13,7 +13,7 @@
 // - Encoding auto-selection (MFM/FM/GCR/M2FM/Tandy)
 //
 // Target: AMD Spartan UltraScale+ SCU35
-// Updated: 2025-12-04 11:50
+// Updated: 2025-12-06 00:17 - Added dskchg inputs and media change interrupt
 //-----------------------------------------------------------------------------
 
 module fluxripper_dual_top (
@@ -76,6 +76,7 @@ module fluxripper_dual_top (
     input  wire        if_a_drv0_track0,
     input  wire        if_a_drv0_wp,
     input  wire        if_a_drv0_ready,
+    input  wire        if_a_drv0_dskchg,    // Disk change (active low on pin 34)
 
     //-------------------------------------------------------------------------
     // Interface A - Drive 1 (Header 1, Drive B)
@@ -91,6 +92,7 @@ module fluxripper_dual_top (
     input  wire        if_a_drv1_track0,
     input  wire        if_a_drv1_wp,
     input  wire        if_a_drv1_ready,
+    input  wire        if_a_drv1_dskchg,    // Disk change (active low on pin 34)
 
     //-------------------------------------------------------------------------
     // Interface B - Drive 2 (Header 2, Drive A)
@@ -106,6 +108,7 @@ module fluxripper_dual_top (
     input  wire        if_b_drv0_track0,
     input  wire        if_b_drv0_wp,
     input  wire        if_b_drv0_ready,
+    input  wire        if_b_drv0_dskchg,    // Disk change (active low on pin 34)
 
     //-------------------------------------------------------------------------
     // Interface B - Drive 3 (Header 2, Drive B)
@@ -121,12 +124,14 @@ module fluxripper_dual_top (
     input  wire        if_b_drv1_track0,
     input  wire        if_b_drv1_wp,
     input  wire        if_b_drv1_ready,
+    input  wire        if_b_drv1_dskchg,    // Disk change (active low on pin 34)
 
     //-------------------------------------------------------------------------
     // Interrupts
     //-------------------------------------------------------------------------
     output wire        irq_fdc_a,       // FDC A interrupt
     output wire        irq_fdc_b,       // FDC B interrupt
+    output wire        irq_msc_media,   // MSC media change interrupt
 
     //-------------------------------------------------------------------------
     // Diagnostic outputs
@@ -159,7 +164,28 @@ module fluxripper_dual_top (
     //-------------------------------------------------------------------------
     // Active high pulse triggers motorized eject mechanism
     output wire        if_eject_a,          // Interface A motorized eject
-    output wire        if_eject_b           // Interface B motorized eject
+    output wire        if_eject_b,          // Interface B motorized eject
+
+    //-------------------------------------------------------------------------
+    // AXI4-Lite Interface for MSC Configuration (Base: 0x40050000)
+    //-------------------------------------------------------------------------
+    input  wire [7:0]  s_axi_msc_awaddr,
+    input  wire        s_axi_msc_awvalid,
+    output wire        s_axi_msc_awready,
+    input  wire [31:0] s_axi_msc_wdata,
+    input  wire [3:0]  s_axi_msc_wstrb,
+    input  wire        s_axi_msc_wvalid,
+    output wire        s_axi_msc_wready,
+    output wire [1:0]  s_axi_msc_bresp,
+    output wire        s_axi_msc_bvalid,
+    input  wire        s_axi_msc_bready,
+    input  wire [7:0]  s_axi_msc_araddr,
+    input  wire        s_axi_msc_arvalid,
+    output wire        s_axi_msc_arready,
+    output wire [31:0] s_axi_msc_rdata,
+    output wire [1:0]  s_axi_msc_rresp,
+    output wire        s_axi_msc_rvalid,
+    input  wire        s_axi_msc_rready
 );
 
     //-------------------------------------------------------------------------
@@ -183,6 +209,17 @@ module fluxripper_dual_top (
     wire [3:0]  motor_on_cmd;
     wire [3:0]  motor_running;
     wire [3:0]  motor_at_speed;
+
+    // MSC Configuration (from msc_config_regs)
+    wire        msc_config_valid;
+    wire [15:0] msc_fdd0_sectors;
+    wire [15:0] msc_fdd1_sectors;
+    wire [31:0] msc_hdd0_sectors;
+    wire [31:0] msc_hdd1_sectors;
+    wire [3:0]  msc_drive_ready;
+    wire [3:0]  msc_drive_wp;
+    wire [3:0]  msc_drive_present;
+    wire [3:0]  msc_media_changed;
 
     // FDC A command interface
     wire [7:0]  fdc_a_cmd_byte;
@@ -799,6 +836,78 @@ module fluxripper_dual_top (
         .drive_profile_valid_b(drive_profile_valid_b),
         .drive_profile_locked_b(drive_profile_locked_b)
     );
+
+    //-------------------------------------------------------------------------
+    // MSC Configuration Registers (Base: 0x40050000)
+    //-------------------------------------------------------------------------
+    // Drive presence from hardware (FDD 0-1, HDD 2-3)
+    wire [3:0] hw_drive_present = {
+        2'b00,                          // HDD 1, HDD 0 (not present in FDC config)
+        if_a_drv1_ready,                // FDD 1 (drive 1 ready)
+        if_a_drv0_ready                 // FDD 0 (drive 0 ready)
+    };
+
+    // Media changed detection from disk change signals
+    // DSKCHG on pin 34 is active-low; invert for positive logic
+    // HDDs don't have dskchg, always 0
+    wire [3:0] hw_media_changed = {
+        2'b00,                          // HDD 1, HDD 0 (no dskchg)
+        ~if_a_drv1_dskchg,              // FDD 1 (Interface A, Drive 1)
+        ~if_a_drv0_dskchg               // FDD 0 (Interface A, Drive 0)
+    };
+
+    // Interface B disk change (active when low)
+    wire [3:0] hw_media_changed_b = {
+        2'b00,                          // HDD (not used)
+        ~if_b_drv1_dskchg,              // FDD 3 (Interface B, Drive 1)
+        ~if_b_drv0_dskchg               // FDD 2 (Interface B, Drive 0)
+    };
+
+    // MSC media change interrupt wire
+    wire msc_media_irq;
+
+    msc_config_regs u_msc_config (
+        .clk              (s_axi_aclk),
+        .rst_n            (s_axi_aresetn),
+
+        // AXI-Lite interface
+        .s_axi_awaddr     (s_axi_msc_awaddr),
+        .s_axi_awvalid    (s_axi_msc_awvalid),
+        .s_axi_awready    (s_axi_msc_awready),
+        .s_axi_wdata      (s_axi_msc_wdata),
+        .s_axi_wstrb      (s_axi_msc_wstrb),
+        .s_axi_wvalid     (s_axi_msc_wvalid),
+        .s_axi_wready     (s_axi_msc_wready),
+        .s_axi_bresp      (s_axi_msc_bresp),
+        .s_axi_bvalid     (s_axi_msc_bvalid),
+        .s_axi_bready     (s_axi_msc_bready),
+        .s_axi_araddr     (s_axi_msc_araddr),
+        .s_axi_arvalid    (s_axi_msc_arvalid),
+        .s_axi_arready    (s_axi_msc_arready),
+        .s_axi_rdata      (s_axi_msc_rdata),
+        .s_axi_rresp      (s_axi_msc_rresp),
+        .s_axi_rvalid     (s_axi_msc_rvalid),
+        .s_axi_rready     (s_axi_msc_rready),
+
+        // Configuration outputs
+        .config_valid     (msc_config_valid),
+        .fdd0_sectors     (msc_fdd0_sectors),
+        .fdd1_sectors     (msc_fdd1_sectors),
+        .hdd0_sectors     (msc_hdd0_sectors),
+        .hdd1_sectors     (msc_hdd1_sectors),
+        .drive_ready      (msc_drive_ready),
+        .drive_wp         (msc_drive_wp),
+
+        // Status inputs
+        .drive_present    (hw_drive_present),
+        .media_changed_in (hw_media_changed),
+
+        // Interrupt output
+        .irq_media_change (msc_media_irq)
+    );
+
+    // Connect MSC media change interrupt to output
+    assign irq_msc_media = msc_media_irq;
 
     //-------------------------------------------------------------------------
     // AXI-Stream Flux Capture A
