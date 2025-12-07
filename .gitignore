@@ -1,0 +1,48 @@
+# Build artifacts
+obj_dir/
+debug/
+sim/obj_dir/
+sim/obj_verilator/
+
+# Simulation outputs
+*.vcd
+*.vvp
+*.fst
+
+# Verilator generated
+*.d
+*.o
+*.a
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Vivado
+*.jou
+*.log
+*.str
+.Xil/
+*.runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Temporary files
+*.tmp
+*.bak
