@@ -95,9 +95,10 @@ All testbenches run with Icarus Verilog. See [SIMULATION_LAYERS.md](SIMULATION_L
 - ✅ Dual interface pin constraints (`scu35_dual_pinout.xdc`)
 
 ### Statistics
-- **30 RTL modules** (~10,500 lines of Verilog)
-- **4 Core Testbenches** + **4 AXI/Dual Testbenches** (2,600+ lines)
-- **1 Test vector file** with CAPSImg patterns
+- **131 RTL modules** (~56,000 lines of Verilog)
+- **19 Testbenches** (~10,400 lines)
+- **SoC Firmware** (~15,000 lines of C)
+- **Test vectors** from CAPSImg
 
 ### Remaining (Requires Hardware)
 - Pin assignments for SCU35 evaluation board
@@ -145,69 +146,89 @@ All testbenches run with Icarus Verilog. See [SIMULATION_LAYERS.md](SIMULATION_L
 ```
 rtl/
 ├── top/               # Top-level integration
-│   ├── fluxripper_top.v         # Single-interface top
-│   ├── fluxripper_dual_top.v    # Dual-interface top (4 drives)
-│   └── fluxripper_universal_top.v # Universal card top (ISA/USB)
-├── fdc_core/          # Command FSM, registers
-│   ├── command_fsm.v            # FDC command state machine
-│   ├── fdc_registers.v          # 82077AA register interface
-│   └── fdc_core_instance.v      # FDC instance wrapper (for dual)
-├── data_separator/    # Digital PLL (6 submodules)
-│   └── zone_calculator.v        # Mac GCR variable-speed zones
-├── am_detector/       # Address mark detection
-├── encoding/          # MFM, FM, GCR, M2FM, Tandy codecs
-│   ├── mfm_codec.v              # MFM encode/decode
-│   ├── fm_codec.v               # FM encode/decode
-│   ├── gcr_apple.v              # Apple GCR 5&3 / 6&2
-│   ├── gcr_cbm.v                # Commodore GCR
-│   ├── m2fm_codec.v             # DEC/Intel M2FM
-│   └── tandy_sync.v             # Tandy/CoCo FM sync
-├── crc/               # CRC-16 CCITT
-├── drive_ctrl/        # Step, motor, index
-│   ├── step_controller.v        # Head positioning
-│   ├── motor_controller.v       # Motor control (4-drive)
-│   └── index_handler_dual.v     # 4-index handler with RPM
-├── write_path/        # Write precompensation
-├── diagnostics/       # Flux capture, quality, drive profile
-│   ├── flux_capture.v           # Flux transition capture
-│   ├── flux_analyzer.v          # Data rate detection
-│   └── drive_profile_detector.v # Auto-detect drive characteristics
-├── host_interface/    # Universal card host adapters
-│   ├── host_interface.v         # Unified register abstraction
-│   ├── host_isa_adapter.v       # ISA bus protocol + DMA
-│   ├── host_usb_adapter.v       # USB via FT232H
-│   ├── isa_dma_controller.v     # ISA DMA channels
+│   ├── fluxripper_top.v         # Main top with JTAG debug
+│   ├── fluxripper_dual_top.v    # Dual-interface (4 drives)
+│   └── fluxripper_hdd_top.v     # HDD controller top
+├── fdc_core/          # FDC command FSM, registers
+├── hdd_controller/    # WD1003-compatible HDD controller
+│   ├── wd_command_fsm.v         # WD command state machine
+│   ├── wd_registers.v           # WD register interface
+│   └── wd_track_buffer.v        # Track buffer management
+├── data_separator/    # Digital PLL (8 submodules)
+├── encoding/          # FDD: MFM, FM, GCR, M2FM, Tandy, Agat
+│   └── ...            # HDD: RLL(2,7), ESDI encoder/decoder
+├── drive_interface/   # ST-506/ESDI physical interface
+│   ├── st506_interface.v        # ST-506 MFM/RLL interface
+│   ├── esdi_phy.v               # ESDI physical layer
+│   ├── esdi_cmd.v               # ESDI command channel
+│   └── hdd_seek_controller.v    # HDD head positioning
+├── diagnostics/       # Flux capture, HDD discovery
+│   ├── hdd_discovery_fsm.v      # Auto-detect HDD parameters
+│   ├── hdd_geometry_scanner.v   # CHS geometry detection
+│   ├── hdd_health_monitor.v     # SMART-like monitoring
+│   └── instrumentation_regs.v   # Performance counters
+├── detection/         # Phase 0 interface detection
+│   ├── interface_detector.v     # FDD vs HDD auto-detect
+│   ├── data_path_sniffer.v      # Signal analysis
+│   └── signal_quality_scorer.v  # Quality metrics
+├── recovery/          # FluxStat statistical recovery
+│   ├── flux_histogram.v         # Weak bit histogram
+│   └── multipass_capture.v      # Multi-pass averaging
+├── dsp/               # Signal processing
+│   ├── fir_flux_filter.v        # FIR filter for flux
+│   ├── prml_decoder.v           # PRML for HDD
+│   └── adaptive_equalizer.v     # Adaptive EQ
+├── usb/               # USB 2.0 HS (ULPI PHY)
+│   ├── usb_top_v2.v             # USB top-level
+│   ├── usb_device_core_v2.v     # Packet handling
+│   ├── usb_hs_negotiator.v      # HS chirp FSM
+│   ├── ulpi_wrapper_v2.v        # ULPI ↔ UTMI
+│   ├── usb_descriptor_rom.v     # 4-personality descriptors
+│   ├── kf_protocol.v            # KryoFlux compatibility
+│   ├── gw_protocol.v            # Greaseweazle compatibility
+│   └── msc_protocol.v           # Mass Storage Class
+├── host/              # ISA bus interface
+│   ├── isa_bus_bridge.v         # ISA protocol bridge
 │   ├── isa_pnp_controller.v     # ISA Plug and Play
-│   └── isa_cdc.v                # ISA clock domain crossing
-├── peripherals/       # Universal card peripherals
-│   ├── spi_oled_driver.v        # SSD1306 OLED
-│   ├── oled_framebuffer.v       # 128x64 pixel buffer
-│   └── power_manager.v          # USB-C PD status
-└── axi/               # AXI infrastructure for SoC
-    ├── axi_stream_flux.v        # Single AXI-Stream master
-    ├── axi_stream_flux_dual.v   # Dual AXI-Stream (parallel capture)
-    ├── axi_fdc_periph.v         # Single AXI4-Lite slave
-    └── axi_fdc_periph_dual.v    # Dual AXI4-Lite (4-drive registers)
+│   └── isa_option_rom.v         # ISA Option ROM
+├── debug/             # JTAG debug subsystem
+│   ├── jtag_tap_controller.v    # IEEE 1149.1 TAP
+│   ├── jtag_dtm.v               # Debug Transport Module
+│   ├── debug_module.v           # RISC-V DM 0.13
+│   └── signal_tap.v             # Logic analyzer
+├── clocking/          # Clock generation
+│   ├── clock_reset_mgr.v        # MMCM + reset sync
+│   └── clk_wizard_hdd.v         # HDD clock domains
+├── bus/               # System bus fabric
+│   └── system_bus.v             # Address decode + arbiter
+├── periph/            # I2C, SPI peripherals
+│   └── i2c_master.v             # INA3221, RTC access
+└── axi/               # AXI infrastructure
+    ├── axi_fdc_periph.v         # FDC AXI4-Lite
+    └── axi_wd_periph.v          # WD HDD AXI4-Lite
 ```
 
 ### Simulation
 ```
-tb/
-├── tb_digital_pll.v       # DPLL lock & tracking tests
+tb/                        # Component testbenches
+├── tb_digital_pll.v       # DPLL lock & tracking
 ├── tb_encoding.v          # MFM/FM/GCR encode/decode
-├── tb_crc16.v             # CRC verification
-└── tb_fluxripper_top.v    # System integration test
+├── tb_rll_2_7.v           # RLL(2,7) HDD encoding
+├── tb_esdi.v              # ESDI interface
+├── tb_wd_controller.v     # WD1003 HDD controller
+├── tb_hdd_discovery.v     # HDD auto-discovery
+├── tb_usb_top_v2.v        # USB 2.0 stack
+├── tb_interface_detector.v # FDD/HDD auto-detect
+└── tb_fluxstat.v          # Statistical recovery
 
-sim/
-├── capsimg_test_vectors.v # Test patterns from CAPSImg
-└── Makefile               # Icarus Verilog/Verilator
-```
-
-### AXI Testbenches (embedded in RTL)
-```
-rtl/axi/
-├── axi_stream_flux.v      # Contains tb_axi_stream_flux (ifdef SIMULATION)
-└── axi_fdc_periph.v       # Contains tb_axi_fdc_periph (ifdef SIMULATION)
+sim/                       # Layered system tests
+├── layer1/                # JTAG DTM tests
+├── layer2/                # Debug Module tests
+├── layer3/                # System Bus tests
+├── layer4/                # Clock/Reset tests
+├── layer5/                # Peripheral tests
+├── layer6/                # Full system integration
+└── Makefile               # Main simulation driver
 ```
 
 ## Resource Budget
