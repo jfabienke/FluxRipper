@@ -437,7 +437,7 @@ BMP> probe_read
 
 ## Layer 5: USB PHY Communication
 
-**Goal:** Verify ULPI interface to USB3300/USB3320 PHY.
+**Goal:** Verify ULPI interface to USB3320 PHY.
 
 ### Procedure
 
@@ -450,7 +450,7 @@ BMP> mem_read 0x44000004
 # Read ULPI Product ID (register 0x02)
 BMP> mem_write 0x44000000 0x00000002  # ULPI read, addr 2
 BMP> mem_read 0x44000004
-→ 00000004  (USB3300 product ID)
+→ 00000004  (USB3320 product ID)
 
 # Check line state (no host connected)
 BMP> mem_read 0x44000010
@@ -473,7 +473,7 @@ BMP> trace_start
 |----------|---------|-------------|
 | Vendor ID Low | 0x00 | 0x24 for SMSC |
 | Vendor ID High | 0x01 | 0x04 for SMSC |
-| Product ID Low | 0x02 | 0x04 for USB3300 |
+| Product ID Low | 0x02 | 0x04 for USB3320 |
 | Product ID High | 0x03 | 0x00 |
 | Function Control | 0x04 | Operating mode |
 | Interface Control | 0x07 | Interface options |

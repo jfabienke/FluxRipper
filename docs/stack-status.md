@@ -35,7 +35,7 @@
 │  └─────────────────────────────────┼──────────────────────────────────────┘ │
 │                                    │ ULPI (60 MHz, 8-bit)                   │
 │                         ┌──────────┴──────────┐                             │
-│                         │ USB3300/USB3320 PHY │                             │
+│                         │    USB3320 PHY      │                             │
 │                         └──────────┬──────────┘                             │
 └────────────────────────────────────┼────────────────────────────────────────┘
                                      │ USB 2.0 HS (480 Mbps)
@@ -287,11 +287,11 @@
 | **USB3320 Features** | `usb3320_features.v` | 446 | BSD-3-Clause | ✅ 100% | VBUS, OTG, charger detection |
 | **USB Traffic Logger** | `usb_traffic_logger.v` | 520 | BSD-3-Clause | ✅ 100% | UTMI packet capture, PCAP export |
 | Logger Integration | `usb_logger_integration.v` | 250 | BSD-3-Clause | ✅ 100% | Integration wrapper example |
-| ULPI Constraints | `ulpi_usb3300.xdc` | 200 | BSD-3-Clause | ✅ 100% | Timing constraints |
+| ULPI Constraints | `ulpi_usb3320.xdc` | 200 | BSD-3-Clause | ✅ 100% | Timing constraints |
 | USB HS Testbench | `tb_usb_top_v2.v` | ~400 | BSD-3-Clause | ✅ 95% | Simulation testbench |
 
 **USB 2.0 HS Features:**
-- 480 Mbps High-Speed operation with USB3300/USB3320 ULPI PHY
+- 480 Mbps High-Speed operation with USB3320 ULPI PHY
 - IAD composite device (0xEF/0x02/0x01) for proper Windows driver binding
 - CDC ACM virtual COM port for debug console (460800 baud, no drivers needed)
 - KryoFlux vendor request interface (control transfers)
@@ -356,15 +356,7 @@
 - `dbg layer` - Show bring-up layer progress
 - `dbg id` - Show JTAG IDCODE
 
-#### 8b. Legacy USB 3.0 Stack (FT601 FIFO Bridge)
-
-| Component | File | Lines | Status | Description |
-|-----------|------|-------|--------|-------------|
-| USB Top | `usb_top.v` | 1,108 | ✅ 95% | USB subsystem integration |
-| FT601 Interface | `ft601_interface.v` | 663 | ✅ 100% | FTDI FT601 USB 3.0 bridge |
-| USB Personality Mux | `usb_composite_mux.v` | 335 | ✅ 100% | Protocol switching |
-
-#### 8c. Protocol Handlers (Shared)
+#### 8b. Protocol Handlers
 
 | Component | File | Lines | Status | Description |
 |-----------|------|-------|--------|-------------|
@@ -492,7 +484,7 @@
 - KryoFlux-compatible control transfers (bmRequestType=0xC3)
 - CDC ACM debug console on all personalities
 - MSC class request handling for Windows/macOS/Linux file manager
-- $6.28 BOM reduction vs FT601
+- Cost-effective ULPI PHY solution
 - MIT-compatible licensing (entire stack)
 
 ---
@@ -530,7 +522,7 @@
 
 ### Low Priority
 1. SCSI HDD interface (future)
-2. ~~PCIe host interface~~ (removed—XCSU35P has 0 GTH)
+2. ~~PCIe host interface~~ (removed)
 3. ISA PnP controller (specialized use)
 
 ---
@@ -547,7 +539,7 @@
 | 2025-12-07 | 1.2.0 | **6-connector power architecture** - 4 FDD + 2 HDD, USB-C PD, ATX, 24V 8" drive support, 6x INA3221 |
 | 2025-12-07 | 1.1.1 | Added `diag power` - INA3221 power rail monitoring via CDC |
 | 2025-12-07 | 1.1.0 | **FluxRipper composite finalized** - MSC + Vendor + CDC combined, 4 personalities |
-| 2025-12-06 | 1.0.0 | **USB 2.0 HS stack complete** - MIT licensed, replaces FT601 |
+| 2025-12-06 | 1.0.0 | **USB 2.0 HS stack complete** - MIT licensed |
 | 2025-12-06 | 0.9.13 | Clean-room usb_hs_negotiator.v (MIT license) |
 | 2025-12-06 | 0.9.12 | ulpi_wrapper_v2.v replaces GPL version (BSD-3-Clause) |
 | 2025-12-06 | 0.9.11 | CDC ACM debug console (usb_cdc_ep.v) |

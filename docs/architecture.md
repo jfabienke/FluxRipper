@@ -18,7 +18,7 @@ The Universal card design provides multiple host interfaces on a single PCB:
 | **ISA** | Edge connector | ISA bus (3F0-3F7, DMA, IRQ) | Retro PC restoration |
 | **USB 2.0 HS** | USB-C receptacle | ULPI PHY (480 Mbps) | Cross-platform tool (primary) |
 
-**Note:** PCIe removed from design—XCSU35P has 0 GTH transceivers. USB 2.0 HS is the sole high-speed host interface.
+**Note:** USB 2.0 HS is the sole high-speed host interface.
 
 ### Universal Card Peripherals
 | Component | Interface | Purpose |
@@ -463,11 +463,11 @@ High-speed streaming interface for flux transition data to DMA controller.
 
 **Data Format (32-bit per transition):**
 ```
-┌────┬────┬────┬──────┬───────────────────────────────┐
-│ 31 │ 30 │ 29 │28:27 │             26:0              │
-├────┼────┼────┼──────┼───────────────────────────────┤
-│ IX │ OV │ SC │DRV_ID│          Timestamp            │
-└────┴────┴────┴──────┴───────────────────────────────┘
+┌────┬────┬────┬────────┬───────────────────────────────┐
+│ 31 │ 30 │ 29 │ 28:27  │             26:0              │
+├────┼────┼────┼────────┼───────────────────────────────┤
+│ IX │ OV │ SC │ DRV_ID │          Timestamp            │
+└────┴────┴────┴────────┴───────────────────────────────┘
 IX     = Index pulse marker (1 = index pulse detected since last word)
 OV     = Overflow warning (FIFO was full)
 SC     = Sector pulse marker (1 = hard-sector pulse detected since last word)
@@ -675,10 +675,10 @@ fluxripper_top
 The Debug Module Interface (DMI) uses a 41-bit shift register:
 
 ```
-┌───────────────┬───────────────────────────────────┬─────────┐
-│  addr [40:34] │           data [33:2]             │ op [1:0]│
-│    7 bits     │             32 bits               │  2 bits │
-└───────────────┴───────────────────────────────────┴─────────┘
+┌───────────────┬───────────────────────────────────┬──────────┐
+│  addr [40:34] │           data [33:2]             │ op [1:0] │
+│    7 bits     │             32 bits               │  2 bits  │
+└───────────────┴───────────────────────────────────┴──────────┘
 
 op values:
   00 = NOP
@@ -719,6 +719,169 @@ All debug subsystem layers have been validated in simulation:
 | 6 | Full System | 12 | ✅ Pass |
 
 See [SIMULATION_LAYERS.md](SIMULATION_LAYERS.md) for detailed test descriptions.
+
+---
+
+## QIC-117 Tape Controller Architecture
+
+FluxRipper includes support for QIC-117 floppy-interface tape drives, enabling flux capture from QIC-40, QIC-80, QIC-3010, and QIC-3020 tape cartridges.
+
+### QIC-117 Protocol Overview
+
+QIC (Quarter-Inch Cartridge) tape drives "abuse" the standard floppy interface by reinterpreting signals:
+
+| Signal | Floppy Use | QIC-117 Tape Use |
+|--------|------------|------------------|
+| STEP | Head step pulses | Command bits (count = command) |
+| DIR | Head direction | Unused |
+| TRK0 | Track 0 sensor | Status bit stream (time-encoded) |
+| INDEX | Index hole | Segment boundary marker |
+| RDATA | Disk read data | Tape MFM data stream |
+| WDATA | Disk write data | Tape MFM write stream |
+
+### QIC-117 Block Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      FluxRipper QIC-117 Tape Subsystem                       │
+│                                                                             │
+│  ┌──────────────────┐                      ┌──────────────────────────────┐ │
+│  │   Existing FDC   │                      │     QIC-117 Controller       │ │
+│  │   Command FSM    │                      │                              │ │
+│  │                  │    tape_mode_en      │  ┌────────────────────────┐  │ │
+│  │  STEP generator ─┼──────────────────────┼─►│  STEP Pulse Counter    │  │ │
+│  │                  │                      │  │  (count 1-48 pulses)   │  │ │
+│  │  TRK0 input    ◄─┼──────────────────────┼──│                        │  │ │
+│  │                  │                      │  └───────────┬────────────┘  │ │
+│  │  INDEX input   ◄─┼──────────────────────┼──────────────┤               │ │
+│  └──────────────────┘                      │  ┌───────────▼────────────┐  │ │
+│                                            │  │   Command Decoder      │  │ │
+│                                            │  │   48 QIC-117 commands  │  │ │
+│  ┌──────────────────┐                      │  └───────────┬────────────┘  │ │
+│  │   TDR Register   │──── tape_select ────►│              │               │ │
+│  │   (0x3F3)        │                      │  ┌───────────▼────────────┐  │ │
+│  │   [2:0] = drive  │                      │  │   Tape State Machine   │  │ │
+│  │   [7] = enable   │                      │  │   - Position tracking  │  │ │
+│  └──────────────────┘                      │  │   - Segment counter    │  │ │
+│                                            │  │   - Direction state    │  │ │
+│                                            │  └───────────┬────────────┘  │ │
+│  ┌──────────────────┐                      │              │               │ │
+│  │  Status Encoder  │◄─────────────────────┼──────────────┘               │ │
+│  │  TRK0 bit-bang   │                      │                              │ │
+│  │  INDEX pulses    │                      │  ┌────────────────────────┐  │ │
+│  └──────────────────┘                      │  │   Data Streamer        │  │ │
+│                                            │  │   - Block boundary     │  │ │
+│  ┌──────────────────┐                      │  │   - Segment tracking   │  │ │
+│  │  Existing DPLL   │◄─────────────────────┼──│   - Continuous MFM     │  │ │
+│  │  MFM decoder     │                      │  └────────────────────────┘  │ │
+│  └──────────────────┘                      └──────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### QIC-117 Module Hierarchy
+
+```
+fdc_core_instance
+├── ... (existing FDC modules)
+└── qic117_controller              # Main QIC-117 controller
+    ├── qic117_step_counter        # STEP pulse counting with timeout
+    │   ├── 3-stage synchronizer   # Async STEP input sync
+    │   ├── Debounce filter        # 10µs debounce
+    │   └── 100ms timeout counter  # Command boundary detection
+    ├── qic117_cmd_decoder         # Command code decoding
+    │   ├── Command type classify  # Reset/Seek/Skip/Motion/Status/Config
+    │   └── Individual cmd flags   # 48 command outputs
+    ├── qic117_status_encoder      # TRK0 status bit encoding
+    │   ├── 500µs/1500µs timing    # Bit 0/1 encoding
+    │   └── 1ms inter-bit gap      # Gap timing
+    ├── qic117_tape_fsm            # Position tracking FSM
+    │   ├── Segment counter        # 0-4095 segments
+    │   ├── Track counter          # 0-27 tracks (QIC-80)
+    │   ├── Motion state           # Seek/Skip/Stream states
+    │   └── Serpentine logic       # Bi-directional track handling
+    └── qic117_data_streamer       # Block boundary detector
+        ├── Sync pattern detect    # 0x4489 MFM sync
+        ├── Block assembly         # 512-byte data blocks
+        ├── Segment tracking       # 32 blocks per segment
+        └── File mark detection    # 0x1F header byte
+```
+
+### QIC-117 Data Flow
+
+**Command Flow:**
+1. Host sends N STEP pulses (1-48)
+2. `qic117_step_counter` counts and debounces pulses
+3. After 100ms timeout, pulse count becomes command code
+4. `qic117_cmd_decoder` decodes to specific command flags
+5. `qic117_tape_fsm` executes command (seek, skip, stream)
+6. Status reported via `qic117_status_encoder` on TRK0
+
+**Data Capture Flow:**
+1. Tape drive moves in stream mode
+2. MFM data arrives on RDATA
+3. Existing DPLL recovers clock/data
+4. `qic117_data_streamer` detects block boundaries
+5. Data bytes output with position tracking
+6. INDEX asserted at segment boundaries (32 blocks)
+
+### QIC Tape Data Format
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           QIC Block Structure                                │
+│                                                                             │
+│  ┌──────────┬───────────┬────────┬───────────────────────┬──────────┐       │
+│  │ Preamble │ Sync Mark │ Header │        Data           │   ECC    │       │
+│  │ 10 bytes │  2 bytes  │ 1 byte │      512 bytes        │ 3 bytes  │       │
+│  │  (0x00)  │(0xA1,0xA1)│ (type) │                       │          │       │
+│  └──────────┴───────────┴────────┴───────────────────────┴──────────┘       │
+│                                                                             │
+│  Segment = 32 blocks = 16 KB                                                │
+│  Track contains multiple segments                                           │
+│  Serpentine: Track 0→, Track 1←, Track 2→, ...                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### TRK0 Status Bit Timing
+
+```
+         ┌─────────────────────────────────────────────────────────────────┐
+  TRK0   │                                                                 │
+  (idle) ─┘                                                                 │
+         │     ┌─────────────────┐        ┌───────┐        ┌───────┐       │
+  Bit=1  │     │    1500 µs      │        │ 1 ms  │        │       │       │
+         │     │                 │        │  gap  │        │       │       │
+         └─────┘                 └────────┘       └────────┘       └───... │
+         │     ┌───────┐        ┌───────┐        ┌───────┐                 │
+  Bit=0  │     │500 µs │        │ 1 ms  │        │       │                 │
+         │     │       │        │  gap  │        │       │                 │
+         └─────┘       └────────┘       └────────┘       └───────────...   │
+         │                                                                 │
+         └─────────────────────────────────────────────────────────────────┘
+```
+
+### Supported QIC Standards
+
+| Standard | Tracks | Capacity | Data Rate | BPI | Max Segments |
+|----------|--------|----------|-----------|-----|--------------|
+| QIC-40 | 20 | 40 MB | 250-500 Kbps | 10,000 | ~2,500 |
+| QIC-80 | 28 | 80-170 MB | 500 Kbps | 12,500 | ~5,000 |
+| QIC-3010 | 40-50 | 340 MB | 500 Kbps | 22,125 | ~10,000 |
+| QIC-3020 | 40-50 | 680 MB | 1 Mbps | 22,125 | ~20,000 |
+
+### Resource Utilization (QIC-117 Subsystem)
+
+| Module | LUTs | FFs | BRAM |
+|--------|------|-----|------|
+| qic117_controller | ~100 | ~50 | 0 |
+| qic117_cmd_decoder | ~200 | ~100 | 0 |
+| qic117_step_counter | ~150 | ~100 | 0 |
+| qic117_status_encoder | ~150 | ~100 | 0 |
+| qic117_tape_fsm | ~300 | ~200 | 0 |
+| qic117_data_streamer | ~200 | ~150 | 0 |
+| **Total** | **~1,100** | **~700** | **0** |
+
+This represents approximately 3% of XCSU35P resources.
 
 ---
 

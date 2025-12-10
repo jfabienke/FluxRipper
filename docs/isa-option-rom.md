@@ -1,6 +1,7 @@
 # FluxRipper ISA Option ROM Design
 
 **Date:** 2025-12-07 14:30
+**Updated:** 2025-12-07
 **Status:** Design Specification
 **Target:** Universal Card (ISA + USB 2.0 HS)
 
@@ -8,12 +9,195 @@
 
 ## Overview
 
-An ISA Option ROM enables FluxRipper to provide BIOS-level boot support for vintage PCs. When inserted into an ISA slot, the host BIOS automatically discovers and initializes the ROM during POST, allowing:
+FluxRipper uses **two Option ROMs** to provide complete BIOS-level support for vintage PCs:
 
-1. **INT 13h Hook** — Boot from FluxRipper-attached drives
-2. **Drive Parameter Tables** — Support non-standard drive geometries
-3. **Setup Utility** — Configuration menu accessible via keystroke during POST
-4. **Diagnostic Tools** — Low-level disk utilities available pre-DOS
+1. **FDC ROM: Sergey's Multi-Floppy BIOS** — Enhanced floppy support
+2. **HDD ROM: FluxRipper HDD BIOS** — ST-506/ESDI hard drive support
+
+When inserted into an ISA slot, the host BIOS automatically discovers and initializes both ROMs during POST.
+
+---
+
+## Dual ROM Architecture
+
+### Why Two ROMs?
+
+| ROM | INT Hook | Purpose |
+|-----|----------|---------|
+| **Multi-Floppy BIOS** | INT 13h (FDD) | Replace motherboard floppy logic |
+| **HDD BIOS** | INT 13h (HDD) | Add ST-506/ESDI hard drive support |
+
+The PC BIOS uses INT 13h for both floppy and hard drives, distinguished by drive number:
+- Drives 00h-7Fh: Floppy drives (A:, B:, etc.)
+- Drives 80h-FFh: Hard drives (C:, D:, etc.)
+
+### ROM Memory Map
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ C8000h - CBFFFh (16KB)  │  Multi-Floppy BIOS (FDC)              │
+├─────────────────────────────────────────────────────────────────┤
+│ CC000h - CFFFFh (16KB)  │  FluxRipper HDD BIOS                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 1. Multi-Floppy BIOS (Sergey's BIOS)
+
+### Source & License
+
+- **Author:** Sergey Kiselev
+- **Used by:** TexElec Quad-Flop, other retro projects
+- **Repository:** https://github.com/skiselev/floppy_bios
+- **License:** GPL v3
+
+### What It Does
+
+The Multi-Floppy BIOS **replaces the motherboard's native floppy logic**, enabling:
+
+| Feature | Standard BIOS | Multi-Floppy BIOS |
+|---------|---------------|-------------------|
+| Max drives | 2 (A:, B:) | **4** (A:, B:, C:, D:) |
+| 360KB 5.25" | Yes | Yes |
+| 720KB 3.5" | Some | **Yes** |
+| 1.2MB 5.25" | AT only | **Yes (including XT!)** |
+| 1.44MB 3.5" | AT only | **Yes (including XT!)** |
+| 2.88MB 3.5" | Rare | **Yes** |
+| Boot from HD floppy on XT | No | **Yes** |
+
+### The Magic: HD Floppy on IBM PC 5150
+
+The original IBM PC 5150 BIOS only understands 360KB drives. Multi-Floppy BIOS:
+
+1. Hooks INT 13h before the motherboard BIOS
+2. Intercepts all floppy requests (drives 00h-03h)
+3. Handles the request using its own FDC driver
+4. Supports 500kbps data rate (HD) even on XT FDC hardware
+5. Returns results in standard INT 13h format
+
+This allows an unmodified IBM PC 5150 to **boot from a 1.44MB floppy**.
+
+### FluxRipper Integration
+
+FluxRipper's FDC emulation provides the hardware interface, while Multi-Floppy BIOS provides the software:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         HOST PC                                 │
+│   ┌─────────────────────────────────────────────────────────┐   │
+│   │                    INT 13h Call                         │   │
+│   │                    (Drive 00h-03h)                      │   │
+│   └────────────────────────┬────────────────────────────────┘   │
+│                            │                                    │
+│                            ▼                                    │
+│   ┌─────────────────────────────────────────────────────────┐   │
+│   │              Multi-Floppy BIOS (ROM)                    │   │
+│   │  • Hooks INT 13h                                        │   │
+│   │  • Manages 4 drives                                     │   │
+│   │  • All floppy formats                                   │   │
+│   └────────────────────────┬────────────────────────────────┘   │
+│                            │                                    │
+│                            ▼                                    │
+│   ┌─────────────────────────────────────────────────────────┐   │
+│   │              I/O Ports 0x3F0-0x3F7                      │   │
+│   └────────────────────────┬────────────────────────────────┘   │
+└────────────────────────────┼────────────────────────────────────┘
+                             │ ISA Bus
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      FLUXRIPPER FPGA                            │
+│   ┌─────────────────────────────────────────────────────────┐   │
+│   │                  FDC Emulation                          │   │
+│   │  • 82077AA-compatible registers                         │   │
+│   │  • All data rates (250/300/500/1000 kbps)               │   │
+│   └────────────────────────┬────────────────────────────────┘   │
+│                            │                                    │
+│                            ▼                                    │
+│   ┌─────────────────────────────────────────────────────────┐   │
+│   │              Physical Floppy Interface                  │   │
+│   │              (34-pin Shugart J3)                        │   │
+│   └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Configuration Options
+
+Multi-Floppy BIOS typically supports configuration via:
+- DIP switches (on ISA card)
+- EEPROM settings
+- Jumpers
+
+For FluxRipper, we'll expose these via:
+- USB configuration tool (saved to SPI flash)
+- Optional onboard DIP switch
+
+| Setting | Options |
+|---------|---------|
+| Drive 0 Type | 360K, 720K, 1.2M, 1.44M, 2.88M |
+| Drive 1 Type | 360K, 720K, 1.2M, 1.44M, 2.88M |
+| Drive 2 Type | None, 360K, 720K, 1.2M, 1.44M, 2.88M |
+| Drive 3 Type | None, 360K, 720K, 1.2M, 1.44M, 2.88M |
+| Boot Drive | A:, B:, C:, D: |
+
+---
+
+## 2. FluxRipper HDD BIOS
+
+The HDD BIOS provides INT 13h services for ST-506 (MFM/RLL) and ESDI hard drives. See **[HDD_BIOS_DESIGN.md](HDD_BIOS_DESIGN.md)** for complete design specification.
+
+### Design Philosophy
+
+Inspired by [XTIDE Universal BIOS](https://www.xtideuniversalbios.org/) modern architecture, but targeting ST-506/ESDI interfaces (not IDE):
+
+- **Leverage FPGA Auto-Detection** — Geometry read from FluxRipper discovery registers
+- **IBM AT Compatible** — Register sequences match original AT BIOS for compatibility
+- **Universal Slot Support** — Automatic 8-bit/16-bit adaptation
+
+### Key Features
+
+| Feature | 8KB Build | 16KB Build |
+|---------|:---------:|:----------:|
+| INT 13h Standard (00h-15h) | ✓ | ✓ |
+| Auto-detected geometry | ✓ | ✓ |
+| All WD personalities | ✓ | ✓ |
+| 8-bit XT / 16-bit AT mode | ✓ | ✓ |
+| INT 13h Extensions (LBA) | - | ✓ |
+| Boot menu (F12) | - | ✓ |
+| Setup utility (F2) | - | ✓ |
+| Diagnostics | - | ✓ |
+
+### Supported Controller Personalities
+
+| Personality | Slot | Interface | Encoding | Max SPT |
+|-------------|------|-----------|----------|---------|
+| WD1002-WX1 | 8-bit XT | ST-506 | MFM | 17 |
+| WD1003-WAH | 16-bit AT | ST-506 | MFM | 17 |
+| WD1006-WAH | 16-bit AT | ST-506 | RLL 2,7 | 26 |
+| WD1007-WAH | 16-bit AT | ESDI | MFM/RLL | 36+ |
+
+### Auto-Detection Integration
+
+The FluxRipper FPGA performs drive discovery at power-on:
+
+```
+FPGA Discovery Pipeline:
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│ PHY Probe    │ → │ Rate Detect  │ → │ Decode Test  │ → │ Geometry     │
+│ (SE vs Diff) │   │ (5-15 Mbps)  │   │ (MFM vs RLL) │   │ Scan         │
+└──────────────┘   └──────────────┘   └──────────────┘   └──────────────┘
+                                                                │
+                           ┌────────────────────────────────────┘
+                           ▼
+                   ┌──────────────────────────────────────────────────┐
+                   │ HDD BIOS reads results from discovery registers: │
+                   │   - Cylinders, heads, sectors per track          │
+                   │   - Encoding type (MFM/RLL/ESDI)                 │
+                   │   - For ESDI: geometry from GET_DEV_CONFIG       │
+                   └──────────────────────────────────────────────────┘
+```
+
+The BIOS does **not** probe the drive directly — it reads pre-computed geometry from FPGA registers.
 
 ---
 

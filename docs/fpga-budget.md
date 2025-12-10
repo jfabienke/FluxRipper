@@ -35,7 +35,6 @@ All timing requirements have significant margin against -1LI limits.
 | DSP (Signal Monitor) | 300 MHz | 600 MHz | ~50% |
 | System Clock | 200 MHz | 667 MHz | ~70% |
 | USB ULPI Clock | 60 MHz | 667 MHz | ~91% |
-| ~~PCIe~~ | ~~Gen3~~ | N/A | XCSU35P has 0 GTH |
 | HyperRAM | 166 MHz DDR | >400 MHz | >58% |
 
 ### Speed Grade Comparison
@@ -53,7 +52,7 @@ All timing requirements have significant margin against -1LI limits.
 
 1. **Power Regulator:** Board PMIC must provide 0.72V on V<sub>CCINT</sub> rail
 2. **Vivado Settings:** Select part `xcsu35p-sbvb625-1LI-i` and configure voltage properties
-3. **No PCIe:** XCSU35P has 0 GTH transceivers; use USB 2.0 HS as primary host interface
+3. **Host Interface:** USB 2.0 HS as primary host interface
 4. **I/O Banks:** HD I/O banks still support 3.3V LVCMOS for level shifter interface
 5. **Eval Kit Note:** SCU35 kit runs at 0.85V; custom board needed for 0.72V operation
 
@@ -181,7 +180,7 @@ USB 2.0 HS provides sufficient bandwidth with 10× margin over dual-drive flux c
 | **Subtotal (USB 2.0 HS)** | **~2,880** | **~1,670** | **~5** | **0** | 480 Mbps, MIT licensed |
 
 **USB 2.0 HS Features:**
-- 480 Mbps High-Speed via USB3300/USB3320 ULPI PHY
+- 480 Mbps High-Speed via USB3320 ULPI PHY
 - IAD composite device (Vendor + CDC ACM)
 - 5 USB personalities (Greaseweazle, HxC, KryoFlux, Native, MSC)
 - KryoFlux-compatible control transfers (bmRequestType=0xC3)
@@ -193,13 +192,11 @@ USB 2.0 HS provides sufficient bandwidth with 10× margin over dual-drive flux c
 | Block | LUTs | FFs | BRAM | DSP | Notes |
 |-------|------|-----|------|-----|-------|
 | ISA Bus Controller | 800 | 400 | 2 | 0 | 8-bit I/O space, DMA support |
-| ~~PCIe x1 Endpoint~~ | ~~3,500~~ | ~~2,000~~ | ~~8~~ | ~~0~~ | Removed: XCSU35P has 0 GTH |
 | SPI Slave Controller | 150 | 80 | 0 | 0 | Up to 50 MHz |
 | I2C Master/Slave | 200 | 100 | 0 | 0 | 100/400 kHz |
 | UART Controller | 100 | 60 | 0 | 0 | 115200-921600 baud |
-| ~~USB Device (FS)~~ | ~~1,200~~ | ~~600~~ | ~~4~~ | ~~0~~ | Replaced by USB 2.0 HS above |
 | HyperRAM Controller | 400 | 200 | 0 | 0 | 166 MHz DDR |
-| **Subtotal (All Host)** | **~1,650** | **~840** | **~2** | **0** | Excludes USB (in main), PCIe removed |
+| **Subtotal (All Host)** | **~1,650** | **~840** | **~2** | **0** | Excludes USB (in main) |
 
 ---
 
@@ -229,11 +226,10 @@ USB 2.0 HS provides sufficient bandwidth with 10× margin over dual-drive flux c
 | HDD Data 1 (20-pin ST-506) | J13 | 20 | 10 GND | **6** |
 | ISA 8-bit (62-pin edge) | Edge | 62 | 16 GND/PWR | **24** |
 | ISA 16-bit ext (36-pin) | Edge | 36 | 8 GND/PWR | **18** |
-| USB 2.0 HS (ULPI) | USB3300/USB3320 | 13 | 0 | **13** |
+| USB 2.0 HS (ULPI) | USB3320 | 13 | 0 | **13** |
 | SPI | Header | 6 | 0 | **6** |
 | I2C | Header | 2 | 0 | **2** |
 | UART | Header | 2 | 0 | **2** |
-| ~~PCIe x1~~ | ~~Edge/Header~~ | N/A | N/A | **0** (no GTH) |
 | HyperRAM | Chip | 24 | 12 | **12** |
 
 ### FPGA Pin Allocation Summary
@@ -247,7 +243,7 @@ USB 2.0 HS provides sufficient bandwidth with 10× margin over dual-drive flux c
 | HDD Data 0 (20-pin) | 6 | Assigned | ST-506 data drive 0 (J11) |
 | HDD Data 1 (20-pin) | 6 | Assigned | ST-506 data drive 1 (J13) |
 | **Host Interfaces** | | | |
-| USB 2.0 HS (ULPI) | 13 | Assigned | USB3300/USB3320 PHY |
+| USB 2.0 HS (ULPI) | 13 | Assigned | USB3320 PHY |
 | ISA Bus (8-bit) | 24 | Assigned | 62-pin edge |
 | ISA Bus (16-bit ext) | 18 | Assigned | 36-pin edge |
 | SPI | 6 | Planned | Config & debug |
@@ -265,9 +261,8 @@ USB 2.0 HS provides sufficient bandwidth with 10× margin over dual-drive flux c
 | + Peripherals (SPI/I2C/UART) | +10 | Planned | Debug & config |
 | + System/LEDs | +7 | Assigned | Clock, reset, status |
 | **Current Config** | **134** | ~45% | FDD + HDD + USB + ISA |
-| ~~+ PCIe x1~~ | ~~+7~~ | Removed | No GTH on XCSU35P |
 | + HyperRAM | +12 | Required | 8MB track buffer |
-| **Full Config** | **146** | ~48% | All interfaces (no PCIe) |
+| **Full Config** | **146** | ~48% | All interfaces |
 | **Available I/O** | 304 | | BGA-625 package |
 
 ### Detailed Pin Assignments
@@ -474,7 +469,7 @@ when the 50-pin mode is selected via a mux controlled by one additional GPIO.
 
 | Pin | Signal | Direction | Notes |
 |-----|--------|-----------|-------|
-| TBD | `ulpi_clk` | Input | 60 MHz clock from USB3300/USB3320 |
+| TBD | `ulpi_clk` | Input | 60 MHz clock from USB3320 |
 | TBD | `ulpi_data[0]` | Bidir | ULPI data bit 0 |
 | TBD | `ulpi_data[1]` | Bidir | ULPI data bit 1 |
 | TBD | `ulpi_data[2]` | Bidir | ULPI data bit 2 |
@@ -518,7 +513,7 @@ when the 50-pin mode is selected via a mux controlled by one additional GPIO.
 | `clk_fdd` | 200 MHz | 5.0 ns | MMCM output |
 | `clk_hdd` | 300 MHz | 3.33 ns | MMCM output |
 | `clk_cpu` | 100 MHz | 10.0 ns | MMCM output |
-| `ulpi_clk` | 60 MHz | 16.67 ns | USB3300/USB3320 PHY (async) |
+| `ulpi_clk` | 60 MHz | 16.67 ns | USB3320 PHY (async) |
 
 **Note:** `ulpi_clk` is asynchronous to all other clock domains. CDC synchronizers are used for all signals crossing between USB and system clock domains.
 
@@ -561,10 +556,9 @@ when the 50-pin mode is selected via a mux controlled by one additional GPIO.
 | Current (incl. USB 2.0 HS) | 16,480 | 9,090 | 69 | 45.8% |
 | + SPI/I2C/UART | +450 | +240 | 0 | 47.0% |
 | + ISA Bus | +800 | +400 | +2 | 48.1% |
-| ~~+ PCIe x1~~ | ~~+3,500~~ | ~~+2,000~~ | ~~+8~~ | Removed |
 | **Full Host Suite** | **+1,650** | **+840** | **+2** | **~51%** |
 
-**Note:** USB 2.0 HS is now included in base configuration (replaces FT601).
+**Note:** USB 2.0 HS is included in base configuration.
 
 ### Future Expansion Headroom
 
@@ -618,14 +612,10 @@ when the 50-pin mode is selected via a mux controlled by one additional GPIO.
 
 | Date | Version | Changes |
 |------|---------|---------|
-| 2025-12-07 | 1.7 | **REMOVED PCIe:** XCSU35P has 0 GTH transceivers |
-| | | USB 2.0 HS (480 Mbps) now sole high-speed host interface |
+| 2025-12-07 | 1.8 | **PCIe fully removed:** Deleted rtl/pcie/ directory and tb_pcie_bridge.v |
+| | | All PCIe references removed from documentation |
+| 2025-12-07 | 1.7 | USB 2.0 HS (480 Mbps) sole high-speed host interface |
 | | | Freed ~3,500 LUTs, 8 BRAM; utilization drops to ~51% |
-| | | Pin count reduced from 153 to 146 |
-| | | Updated all docs: architecture.md, README.md, STACK_STATUS.md |
-| | | Updated comparison docs: controller_comparison.md, *_vs_spinrite.md |
-| | | Marked rtl/pcie/ as DEPRECATED (files retained for reference) |
-| 2025-12-07 | 1.6 | ~~Locked in PCIe Gen3 x1~~ (superseded by v1.7) |
 | 2025-12-07 | 1.5 | Added -1LI Low Power variant recommendation (0.72V) |
 | | | Validated all subsystems compatible with -1LI timing limits |
 | | | Added Speed Grade Selection section with margin analysis |

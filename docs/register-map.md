@@ -572,10 +572,21 @@ FluxRipper implements the Intel 82077AA-1 register interface with the following 
 
 #### TDR (Tape Drive Register) Semantics
 
-The Tape Drive Register at 0x3F3 is **implemented as a stub**:
-- Reads return the last written value
-- Writes are stored but have no functional effect
-- Original 82077AA used TDR for tape drive boot selection (tape support was vestigial by the -1 revision)
+The Tape Drive Register at 0x3F3 enables QIC-117 tape mode:
+
+| Bit | Name | Description |
+|-----|------|-------------|
+| 7 | TAPE_EN | Tape mode enable (1=tape, 0=floppy) |
+| 6:3 | Reserved | Reserved, should be 0 |
+| 2:0 | TAPE_SEL | Tape drive select (1-3, 0=none) |
+
+When TAPE_EN=1, the FDC signal semantics change for QIC-117 tape protocol:
+- **STEP** pulses encode commands (1-48 pulses = command code)
+- **TRK0** becomes status output (time-encoded status bits)
+- **INDEX** signals segment boundaries
+- **RDATA/WDATA** carry continuous MFM data stream
+
+See the "QIC-117 Tape Support" section below for complete tape register documentation
 
 #### MSR/RQM/DIO Semantics
 
@@ -1151,3 +1162,605 @@ drscan fluxripper.tap 41 0x1E000000001
 drscan fluxripper.tap 41 0
 # data field contains 0xFB010100
 ```
+
+---
+
+## User Configuration Registers (ISA)
+
+The FluxRipper FPGA provides user-configurable registers for enabling/disabling controllers at runtime. These registers are accessible from the Option ROM BIOS via the F3 diagnostics menu.
+
+### Register Base Address
+
+| Controller | Base Address | Config Offset | Config Base |
+|------------|--------------|---------------|-------------|
+| FDC | 0x3F0 | +0xD0 | 0x4C0 |
+| WD HDD (AT) | 0x1F0 | +0xD0 | 0x2C0 |
+| WD HDD (XT) | 0x320 | +0xD0 | 0x3F0 |
+
+**Note:** In XT mode, the WD controller uses base 0x320. The BIOS uses the `current_base` variable to access the correct address.
+
+### Register Map (offset from config base)
+
+| Offset | Name | Access | Description |
+|--------|------|--------|-------------|
+| 0x00 | CONFIG_CTRL | R/W | Global control register |
+| 0x01 | CONFIG_FDC | R/W | FDC configuration |
+| 0x02 | CONFIG_WD | R/W | WD HDD configuration |
+| 0x03 | CONFIG_DMA | R/W | DMA configuration |
+| 0x04 | CONFIG_IRQ | R/W | IRQ configuration |
+| 0x05 | CONFIG_STATUS | R | Status register |
+| 0x06 | CONFIG_SCRATCH | R/W | Scratch register (BIOS use) |
+| 0x07 | CONFIG_MAGIC | R | Magic number (0xFB) |
+| 0x08 | CONFIG_INTLV_CTRL | R/W | Interleave control |
+| 0x09 | CONFIG_INTLV_STAT | R | Detected interleave (read-only) |
+| 0x0E | CONFIG_SAVE | W | Write 0x5A to save to flash |
+| 0x0F | CONFIG_RESTORE | W | Write 0xA5 to restore defaults |
+
+### CONFIG_CTRL (0x00) - Global Control
+
+| Bit | Name | Default | Description |
+|-----|------|---------|-------------|
+| 0 | FDC_EN | 1 | FDC controller enabled |
+| 1 | WD_EN | 1 | WD HDD controller enabled |
+| 2-3 | Reserved | 0 | Reserved |
+| 4 | LOCKED | 0 | Configuration write-protected |
+| 5-7 | Reserved | 0 | Reserved |
+
+**Unlock mechanism:** When LOCKED=1, writes are blocked. To unlock, write the value with bit 4 clear. This allows unlocking even when locked.
+
+### CONFIG_FDC (0x01) - FDC Configuration
+
+| Bit | Name | Default | Description |
+|-----|------|---------|-------------|
+| 0 | FDC_DMA_EN | 1 | FDC DMA enabled |
+| 1 | FDC_SEC_EN | 0 | Secondary FDC (0x370) enabled |
+| 2-7 | Reserved | 0 | Reserved |
+
+### CONFIG_WD (0x02) - WD HDD Configuration
+
+| Bit | Name | Default | Description |
+|-----|------|---------|-------------|
+| 0 | WD_DMA_EN | 1 | WD DMA enabled (XT mode only) |
+| 1 | WD_SEC_EN | 0 | Secondary WD (0x170) enabled |
+| 2-6 | Reserved | 0 | Reserved |
+| 7 | BUF_BYPASS | 0 | Track buffer bypass (for benchmark) |
+
+**Track Buffer Bypass (Bit 7):**
+- When set to 1, disables track buffer caching for reads
+- Every sector read goes directly to disk (no cache hits)
+- Used by the Interleave Benchmark to simulate stock WD controller behavior
+- Should be cleared (0) for normal operation
+
+### CONFIG_DMA (0x03) - DMA Configuration
+
+| Bits | Name | Default | Description |
+|------|------|---------|-------------|
+| 2:0 | FDC_DMA | 2 | FDC DMA channel (0-7) |
+| 3 | Reserved | 0 | Reserved |
+| 6:4 | WD_DMA | 3 | WD DMA channel (0-7, XT only) |
+| 7 | Reserved | 0 | Reserved |
+
+### CONFIG_IRQ (0x04) - IRQ Configuration
+
+| Bits | Name | Default | Description |
+|------|------|---------|-------------|
+| 3:0 | FDC_IRQ | 6 | FDC IRQ line (0-15) |
+| 7:4 | WD_IRQ | 14 | WD IRQ line (0-15) |
+
+### CONFIG_STATUS (0x05) - Status Register (Read-Only)
+
+| Bit | Name | Description |
+|-----|------|-------------|
+| 0 | 8BIT | 8-bit XT slot detected |
+| 1 | 16BIT | 16-bit AT slot detected |
+| 2 | PNP | PnP mode active |
+| 3 | FLASH_BUSY | Flash operation in progress |
+| 5:4 | WD_PERS | WD Personality (0=WD1002, 1=WD1003, 2=WD1006, 3=WD1007) |
+| 6 | FDC_PRESENT | FDC hardware installed |
+| 7 | WD_PRESENT | WD hardware installed |
+
+### CONFIG_MAGIC (0x07) - Magic Number (Read-Only)
+
+Always returns 0xFB. Used by BIOS to detect FluxRipper config registers presence.
+
+### CONFIG_INTLV_CTRL (0x08) - Interleave Control
+
+| Bits | Name | Default | Description |
+|------|------|---------|-------------|
+| 3:0 | INTLV | 0 | Target interleave (0=auto, 1-8=override) |
+| 7:4 | Reserved | 0 | Reserved, reads as 0 |
+
+**Interleave Values:**
+- `0` = Auto-match (preserve existing interleave from disk)
+- `1` = 1:1 interleave (no interleave, fastest)
+- `2` = 2:1 interleave (typical for 286)
+- `3` = 3:1 interleave (typical for XT)
+- `4-6` = Higher interleave for slower systems
+- `7-8` = Very slow systems
+
+**Behavior:**
+- When set to 0 (Auto), the FPGA detects and preserves the existing disk interleave pattern on read/write operations
+- When set to 1-8, the FPGA uses the specified interleave for FORMAT TRACK operations
+- The interleave setting affects how sector IDs are arranged on a newly formatted track
+- Auto-match is recommended for disk preservation/forensic applications
+
+### CONFIG_INTLV_STAT (0x09) - Detected Interleave (Read-Only)
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 3:0 | DETECTED | Last detected interleave (1-8, or 0 if unknown) |
+| 7:4 | Reserved | Reserved, reads as 0 |
+
+**Notes:**
+- This register reflects the interleave pattern detected from the last track read
+- Value is updated by the FPGA's interleave detection logic during disk reads
+- Returns 0 if no track has been read or detection failed
+- Detection analyzes the physical order of sector IDs on the track
+
+**Example Usage (Assembly):**
+```asm
+; Read detected interleave
+    mov     dx, WD_BASE + 0xD0 + 0x09   ; CONFIG_INTLV_STAT
+    in      al, dx
+    and     al, 0x0F                     ; Mask to interleave value
+    ; AL now contains detected interleave (1-8) or 0
+
+; Set interleave override to 3:1
+    mov     dx, WD_BASE + 0xD0 + 0x08   ; CONFIG_INTLV_CTRL
+    mov     al, 3                        ; 3:1 interleave
+    out     dx, al
+
+; Return to auto-match mode
+    mov     dx, WD_BASE + 0xD0 + 0x08   ; CONFIG_INTLV_CTRL
+    xor     al, al                       ; 0 = auto-match
+    out     dx, al
+```
+
+### CONFIG_SAVE (0x0E) - Save to Flash
+
+Write 0x5A to save current configuration to flash storage. Check CONFIG_STATUS.FLASH_BUSY until clear.
+
+### CONFIG_RESTORE (0x0F) - Restore Defaults
+
+Write 0xA5 to restore factory defaults (both controllers enabled).
+
+### Usage Example (Assembly)
+
+```asm
+; Check if FluxRipper config registers are present
+    mov     dx, 0x3F0 + 0xD0 + 0x07   ; FDC base + config offset + MAGIC
+    in      al, dx
+    cmp     al, 0xFB                   ; Check magic
+    jne     .no_fluxripper
+
+; Read current configuration
+    mov     dx, 0x3F0 + 0xD0 + 0x00   ; CONFIG_CTRL
+    in      al, dx
+
+; Disable WD controller
+    and     al, ~0x02                  ; Clear WD_EN bit
+    out     dx, al
+
+; Save to flash
+    mov     dx, 0x3F0 + 0xD0 + 0x0E   ; CONFIG_SAVE
+    mov     al, 0x5A                   ; Save magic
+    out     dx, al
+
+; Wait for flash complete
+.wait_flash:
+    mov     dx, 0x3F0 + 0xD0 + 0x05   ; CONFIG_STATUS
+    in      al, dx
+    test    al, 0x08                   ; FLASH_BUSY
+    jnz     .wait_flash
+```
+
+### Edge Cases and Limitations
+
+#### Cannot Disable Host Controller
+
+**Critical limitation:** You cannot disable the controller that hosts the config registers from its own BIOS.
+
+| BIOS | Cannot Disable | Can Disable |
+|------|----------------|-------------|
+| FDD BIOS | FDC | WD HDD |
+| HDD BIOS | WD HDD | FDC |
+
+If you disable the host controller and save to flash, you lose access to re-enable it. The BIOS prevents this by blocking the toggle operation.
+
+#### 8KB ROM Build Limitation
+
+The F3 diagnostics menu (including config) is only available in 16KB ROM builds. Systems using 8KB ROMs cannot access the config menu.
+
+```asm
+%if BUILD_16KB && ENABLE_DIAG
+    ; Config menu code here
+%endif
+```
+
+**Workaround:** Use a USB configuration tool or JTAG to modify settings.
+
+#### PnP Mode Override Warning
+
+When PnP mode is active (CONFIG_STATUS.PNP=1), the OS PnP driver may override user settings. Settings saved via the F3 menu take effect only in legacy mode.
+
+#### Configuration Lock
+
+If CONFIG_CTRL.LOCKED=1:
+- All register writes are blocked (except unlock)
+- Save and restore operations are blocked
+- Press [U] in F3 menu to unlock
+
+#### Flash Timeout
+
+Flash save operations should complete within ~1 second. If CONFIG_STATUS.FLASH_BUSY remains set after timeout, the save failed. The BIOS reports "Settings NOT saved" in this case.
+
+#### XT Mode I/O Base
+
+In 8-bit XT mode, the WD controller uses base 0x320 instead of 0x1F0. The HDD BIOS uses the `current_base` variable to access the correct config register address. The config menu displays "I/O Base: 0x0320" for verification.
+
+#### Controller Presence Bits
+
+CONFIG_STATUS bits 6-7 indicate whether FDC/WD hardware is actually installed. If a controller is not present (bit=0), the BIOS displays "(not installed)" and prevents toggle operations.
+
+---
+
+## QIC-117 Tape Support
+
+FluxRipper includes QIC-117 floppy-interface tape drive support for capturing data from QIC-40, QIC-80, QIC-3010, and QIC-3020 tape drives.
+
+### Supported Tape Standards
+
+| Standard | Tracks | Capacity | Data Rate | BPI |
+|----------|--------|----------|-----------|-----|
+| QIC-40 | 20 | 40 MB | 250-500 Kbps | 10,000 |
+| QIC-80 | 28 | 80-170 MB | 500 Kbps | 12,500 |
+| QIC-3010 | 40-50 | 340 MB | 500 Kbps | 22,125 |
+| QIC-3020 | 40-50 | 680 MB | 1 Mbps | 22,125 |
+
+### TDR Register (0x3F3) - Tape Mode Control
+
+| Bit | Name | Access | Description |
+|-----|------|--------|-------------|
+| 7 | TAPE_EN | R/W | Tape mode enable (1=tape mode, 0=floppy mode) |
+| 6:3 | Reserved | R | Reserved, reads as 0 |
+| 2:0 | TAPE_SEL | R/W | Tape drive select (1-3, 0=none selected) |
+
+**Mode switching:**
+- Setting TAPE_EN=1 activates QIC-117 tape protocol
+- All FDC signal semantics change (see table below)
+- Setting TAPE_EN=0 returns to standard floppy mode
+- State is reset when switching modes
+
+### Signal Reinterpretation (Tape Mode)
+
+When TDR[7]=1 (tape mode enabled), FDC signals have different meanings:
+
+| Signal | Floppy Mode | Tape Mode (QIC-117) |
+|--------|-------------|---------------------|
+| STEP | Head step pulse | Command bit (count = command code) |
+| DIR | Head direction | Unused (direction internal to drive) |
+| TRK0 | Track 0 sensor | Status bit stream output (time-encoded) |
+| INDEX | Index hole | Segment boundary marker |
+| RDATA | Disk read data | Tape MFM data stream (continuous) |
+| WDATA | Disk write data | Tape MFM write stream (continuous) |
+
+### QIC-117 Command Protocol
+
+Commands are sent by issuing STEP pulses. The number of pulses (1-48) determines the command:
+
+| Pulses | Command | Description |
+|--------|---------|-------------|
+| 1 | RESET_1 | Soft reset |
+| 2 | RESET_2 | Hard reset |
+| 4 | REPORT_STATUS | Report 8-bit status word via TRK0 |
+| 5 | REPORT_NEXT_BIT | Report next status bit via TRK0 |
+| 6 | PAUSE | Stop tape motion |
+| 7 | MICRO_STEP_PAUSE | Micro-step pause |
+| 8 | SEEK_LOAD_POINT | Seek to BOT (beginning of tape) |
+| 9 | SEEK_EOT | Seek to EOT (end of tape) |
+| 10 | SKIP_REV_SEG | Skip 1 segment reverse |
+| 11 | SKIP_REV_FILE | Skip to previous file mark |
+| 12 | SKIP_FWD_SEG | Skip 1 segment forward |
+| 13 | SKIP_FWD_FILE | Skip to next file mark |
+| 21 | LOGICAL_FWD | Enter logical forward streaming mode |
+| 22 | LOGICAL_REV | Enter logical reverse streaming mode |
+| 23 | STOP_TAPE | Stop tape motion |
+| 30 | PHYSICAL_FWD | Physical forward motion |
+| 31 | PHYSICAL_REV | Physical reverse motion |
+| 36 | NEW_CARTRIDGE | Signal new cartridge inserted |
+| 45 | SELECT_RATE | Select data rate |
+| 46 | PHANTOM_SELECT | Enable drive (phantom select) |
+| 47 | PHANTOM_DESELECT | Disable drive |
+
+**Command timing:**
+- Minimum inter-pulse gap: ~2.5ms (set by FDC SPECIFY register)
+- Command timeout: 100ms after last STEP pulse
+- After timeout, pulse count is latched as command code
+
+### TRK0 Status Encoding
+
+Status bits are encoded as pulse widths on the TRK0 signal:
+
+| Bit Value | TRK0 Low Time | Gap Time |
+|-----------|---------------|----------|
+| 0 | 500 µs | 1000 µs |
+| 1 | 1500 µs | 1000 µs |
+
+**Status byte format (MSB first):**
+
+| Bit | Name | Description |
+|-----|------|-------------|
+| 7 | READY | Drive ready |
+| 6 | ERROR | Error condition |
+| 5 | CARTRIDGE | Cartridge present |
+| 4 | WRITE_PROT | Write protected |
+| 3 | NEW_CART | New cartridge detected |
+| 2 | AT_BOT | At beginning of tape |
+| 1 | AT_EOT | At end of tape |
+| 0 | Reserved | Reserved (always 0) |
+
+### Extended Tape Registers (AXI)
+
+Additional tape status registers are available via AXI peripheral access.
+
+#### TAPE_STATUS (Offset 0x30) - Read Only
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 31:24 | Reserved | Always 0 |
+| 23:16 | TAPE_STATE | FSM state (debug) |
+| 15:8 | STATUS_WORD | Current status byte |
+| 7 | READY | Drive ready |
+| 6 | ERROR | Error condition |
+| 5 | MOVING | Tape currently moving |
+| 4 | STREAMING | In streaming mode |
+| 3 | AT_BOT | At beginning of tape |
+| 2 | AT_EOT | At end of tape |
+| 1 | CMD_ACTIVE | Command in progress |
+| 0 | TAPE_MODE | Tape mode active (mirrors TDR[7]) |
+
+#### TAPE_POSITION (Offset 0x34) - Read Only
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 31:21 | Reserved | Always 0 |
+| 20:16 | TRACK | Current track number (0-27 for QIC-80) |
+| 15:0 | SEGMENT | Current segment number (0-4095) |
+
+#### TAPE_COMMAND (Offset 0x38) - Read/Write
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 31:6 | Reserved | Ignored on write, 0 on read |
+| 5:0 | COMMAND | Last command code (R) / Direct command (W) |
+
+**Direct command interface:**
+- Write 1-48 to issue command without STEP pulses
+- Useful for firmware-controlled tape operations
+- Read returns last decoded command
+
+#### TAPE_BLOCK_STATUS (Offset 0x3C) - Read Only
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 31 | FILE_MARK | File mark detected |
+| 30 | BLOCK_SYNC | Block sync detected |
+| 29 | SEG_COMPLETE | Segment (32 blocks) complete |
+| 28:16 | Reserved | Always 0 |
+| 15:11 | BLOCK_NUM | Block number in segment (0-31) |
+| 10:9 | Reserved | Always 0 |
+| 8:0 | BYTE_NUM | Byte position in block (0-511) |
+
+### QIC Tape Data Format
+
+Unlike floppy disks with sector structure, QIC tapes use continuous streaming:
+
+| Component | Size | Description |
+|-----------|------|-------------|
+| Preamble | 10 bytes | 0x00 pattern for PLL sync |
+| Sync Mark | 2 bytes | 0xA1, 0xA1 with missing clock (MFM 0x4489) |
+| Header | 1 byte | Block type identifier |
+| Data | 512 bytes | User data |
+| ECC | 3 bytes | Error correction |
+
+**Block types (header byte):**
+
+| Value | Type | Description |
+|-------|------|-------------|
+| 0x00 | DATA | Normal data block |
+| 0x0F | EOD | End of data marker |
+| 0x1F | FILE_MARK | File mark (tape file separator) |
+| 0xFF | BAD | Bad block marker |
+
+**Segment structure:**
+- 32 blocks per segment = 16 KB per segment
+- Segments separated by inter-record gaps
+- Track contains multiple segments
+
+### Tape Mode Usage Example (C)
+
+```c
+#include "fdc_regs.h"
+
+// Enable tape mode
+void tape_mode_enable(uint8_t drive_select) {
+    uint8_t tdr = 0x80 | (drive_select & 0x07);  // TAPE_EN=1, TAPE_SEL=drive
+    outb(TDR_PORT, tdr);  // 0x3F3
+}
+
+// Send QIC-117 command via STEP pulses
+void tape_send_command(uint8_t cmd) {
+    for (int i = 0; i < cmd; i++) {
+        // Generate STEP pulse via DOR motor bits toggle
+        // or use direct command register
+        delay_us(2500);  // Inter-pulse gap
+    }
+    delay_ms(100);  // Command timeout
+}
+
+// Initialize tape drive
+void tape_init(void) {
+    tape_mode_enable(1);           // Select tape drive 1
+    tape_send_command(1);          // RESET
+    tape_send_command(46);         // PHANTOM_SELECT
+    tape_send_command(36);         // NEW_CARTRIDGE
+    tape_send_command(8);          // SEEK_LOAD_POINT (rewind)
+}
+
+// Read status via direct register
+uint8_t tape_get_status(void) {
+    return AXI_READ(TAPE_STATUS) & 0xFF;
+}
+
+// Get current position
+void tape_get_position(uint16_t *segment, uint8_t *track) {
+    uint32_t pos = AXI_READ(TAPE_POSITION);
+    *segment = pos & 0xFFFF;
+    *track = (pos >> 16) & 0x1F;
+}
+```
+
+### Automatic Drive Detection
+
+FluxRipper can automatically detect QIC-117 tape drive presence, vendor, model, and capabilities. This eliminates the need for manual drive configuration.
+
+#### TAPE_DETECT_CTRL (Offset 0x3C) - Read/Write
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 31:2 | Reserved | Ignored on write, 0 on read |
+| 1 | ABORT | Write 1 to abort detection in progress |
+| 0 | START | Write 1 to start auto-detection sequence |
+
+**Operation:**
+- Write 0x01 to start detection
+- Write 0x02 to abort detection
+- Read returns current detection status (same as TAPE_DETECT_STATUS)
+
+**Detection Sequence:**
+1. Send PHANTOM_SELECT (46 pulses)
+2. Send REPORT_STATUS (4 pulses) - verify drive responds
+3. Send REPORT_VENDOR (38 pulses) - get vendor ID
+4. Send REPORT_MODEL (39 pulses) - get model ID
+5. Send REPORT_DRIVE_CFG (41 pulses) - get capabilities
+6. Decode results to identify drive type
+
+#### TAPE_DETECT_STATUS (Offset 0x40) - Read Only
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 31:4 | Reserved | Always 0 |
+| 3 | DETECTED | Drive detected and responding |
+| 2 | ERROR | Detection sequence failed |
+| 1 | COMPLETE | Detection sequence finished |
+| 0 | IN_PROGRESS | Detection currently running |
+
+**Status interpretation:**
+- IN_PROGRESS=1: Detection running, wait for COMPLETE or ERROR
+- COMPLETE=1, DETECTED=1: Drive found and identified
+- COMPLETE=1, DETECTED=0: No drive present (timeout)
+- ERROR=1: Detection aborted or communication failure
+
+#### TAPE_VENDOR_MODEL (Offset 0x44) - Read Only
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 31:24 | CONFIG | Drive configuration byte |
+| 23:16 | Reserved | Always 0 |
+| 15:8 | MODEL_ID | Model identifier |
+| 7:0 | VENDOR_ID | Vendor identifier |
+
+**Known Vendor IDs:**
+
+| ID | Vendor |
+|----|--------|
+| 0x01 | Colorado Memory Systems (CMS) |
+| 0x02 | Conner/Archive/Seagate |
+| 0x03 | Iomega |
+| 0x04 | Mountain |
+| 0x05 | Wangtek |
+| 0x06 | Exabyte |
+| 0x07 | AIWA |
+| 0x08 | Sony |
+
+**Model ID interpretation** is vendor-specific. See vendor documentation for details.
+
+#### TAPE_DRIVE_INFO (Offset 0x48) - Read Only
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 31:18 | Reserved | Always 0 |
+| 17:16 | RATES | Supported data rates bitmap |
+| 15:12 | Reserved | Always 0 |
+| 11:8 | TYPE | Drive type enumeration |
+| 7:5 | Reserved | Always 0 |
+| 4:0 | MAX_TRACKS | Maximum tracks supported |
+
+**Data Rate Bitmap (RATES):**
+
+| Value | Meaning |
+|-------|---------|
+| 0b01 | 250 Kbps (QIC-40) |
+| 0b10 | 500 Kbps (QIC-80, QIC-3010) |
+| 0b11 | 1 Mbps (QIC-3020) |
+
+**Drive Type Enumeration (TYPE):**
+
+| Value | Type | Tracks | Capacity |
+|-------|------|--------|----------|
+| 0 | Unknown | - | - |
+| 1 | QIC-40 | 20 | 40 MB |
+| 2 | QIC-80 | 28 | 80-170 MB |
+| 3 | QIC-80 Wide | 28 | 120 MB |
+| 4 | QIC-3010 | 40 | 340 MB |
+| 5 | QIC-3020 | 40 | 680 MB |
+| 6 | Travan TR-1 | 36 | 400 MB |
+| 7 | Travan TR-2 | 36 | 800 MB |
+| 8 | Travan TR-3 | 50 | 1.6 GB |
+| 9 | Iomega Ditto | 28 | 120 MB |
+| 10 | Iomega Ditto Max | 40 | 400 MB |
+
+#### Detection Usage Example (C)
+
+```c
+#include "fdc_regs.h"
+
+// Start drive detection
+void tape_detect_drive(void) {
+    // Must be in tape mode first
+    tape_mode_enable(1);
+
+    // Start detection
+    AXI_WRITE(TAPE_DETECT_CTRL, 0x01);
+
+    // Wait for completion
+    uint32_t status;
+    do {
+        status = AXI_READ(TAPE_DETECT_STATUS);
+    } while (status & 0x01);  // Wait while IN_PROGRESS
+
+    if (status & 0x08) {  // DETECTED
+        // Read detection results
+        uint32_t vendor_model = AXI_READ(TAPE_VENDOR_MODEL);
+        uint32_t drive_info = AXI_READ(TAPE_DRIVE_INFO);
+
+        uint8_t vendor = vendor_model & 0xFF;
+        uint8_t model = (vendor_model >> 8) & 0xFF;
+        uint8_t drive_type = (drive_info >> 8) & 0x0F;
+        uint8_t max_tracks = drive_info & 0x1F;
+
+        printf("Vendor: 0x%02X, Model: 0x%02X\n", vendor, model);
+        printf("Type: %d, Max tracks: %d\n", drive_type, max_tracks);
+    } else {
+        printf("No tape drive detected\n");
+    }
+}
+```
+
+### Limitations
+
+- **Write support**: Currently read-only capture; write path not implemented
+- **ECC**: ECC bytes are captured but not validated in hardware
+- **Serpentine**: Multi-track serpentine recording supported via track FSM
+- **Data rate**: Auto-detection identifies capabilities but does not change rate
+- **Detection time**: Detection sequence takes ~2-3 seconds to complete

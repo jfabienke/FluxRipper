@@ -23,7 +23,7 @@ The FluxRipper Universal is a multi-host PCB design that functions as:
 | **USB Device** | USB-C (host) | USB 2.0 HS (480 Mbps) | Cross-platform tool (primary) |
 | **Standalone** | USB-C PD (charger) | USB serial console | Portable disk utility |
 
-**Note:** PCIe removed—XCSU35P has 0 GTH transceivers. USB 2.0 HS via ULPI PHY is the primary high-speed interface.
+**Note:** USB 2.0 HS via ULPI PHY is the primary high-speed interface.
 
 ### Universal Card Features
 
@@ -54,7 +54,7 @@ The FluxRipper Universal is a multi-host PCB design that functions as:
 | 5 | Peripheral Subsystems | 8 | ✅ Pass |
 | 6 | Full System Integration | 12 | ✅ Pass |
 
-All testbenches run with Icarus Verilog. See [SIMULATION_LAYERS.md](SIMULATION_LAYERS.md) for details.
+All testbenches run with Icarus Verilog. See [simulation-layers.md](simulation-layers.md) for details.
 
 ### Implemented Modules
 
@@ -120,27 +120,31 @@ All testbenches run with Icarus Verilog. See [SIMULATION_LAYERS.md](SIMULATION_L
 
 ### Architecture
 - [architecture.md](architecture.md) - System architecture, clock domains, CDC strategy
-- [register_map.md](register_map.md) - 82077AA register interface, AXI4-Lite map
-  - [82077AA Compatibility](register_map.md#82077aa-compatibility-notes) - Implemented commands, edge cases
-  - [Signal Quality Algorithm](register_map.md#signal-quality-algorithm) - Metric derivation, thresholds
+- [register-map.md](register-map.md) - 82077AA register interface, AXI4-Lite map
+  - [82077AA Compatibility](register-map.md#82077aa-compatibility-notes) - Implemented commands, edge cases
+  - [Signal Quality Algorithm](register-map.md#signal-quality-algorithm) - Metric derivation, thresholds
 
 ### Hardware Reference
-- [drive_support.md](drive_support.md) - Comprehensive drive compatibility guide
-  - [Supported Drive Families](drive_support.md#supported-drive-families) - 3.5", 5.25", 8" drives
-  - [Track Density (TPI)](drive_support.md#track-density-tpi-support) - 48, 96, 100, 135 TPI handling
-  - [Data Rates & Encoding](drive_support.md#data-rate-support) - MFM, FM, GCR configurations
-  - [Physical Interface](drive_support.md#physical-interface-reference) - 34-pin and 50-pin Shugart pinouts
-  - [Platform-Specific Notes](drive_support.md#platform-specific-notes) - Apple II, Commodore, Amiga, 8" drives
+- [drive-support.md](drive-support.md) - Comprehensive drive compatibility guide
+  - [Supported Drive Families](drive-support.md#supported-drive-families) - 3.5", 5.25", 8" drives
+  - [Track Density (TPI)](drive-support.md#track-density-tpi-support) - 48, 96, 100, 135 TPI handling
+  - [Data Rates & Encoding](drive-support.md#data-rate-support) - MFM, FM, GCR configurations
+  - [Physical Interface](drive-support.md#physical-interface-reference) - 34-pin and 50-pin Shugart pinouts
+  - [Platform-Specific Notes](drive-support.md#platform-specific-notes) - Apple II, Commodore, Amiga, 8" drives
+- [tape-support.md](tape-support.md) - QIC-117 floppy-interface tape drive support
+  - [Supported Tape Standards](tape-support.md#supported-tape-standards) - QIC-40/80/3010/3020, Travan
+  - [Command Protocol](tape-support.md#qic-117-command-protocol) - QIC-117 command reference
+  - [Automatic Detection](tape-support.md#automatic-drive-detection) - Drive auto-identification
 
 ### Applications
-- [use_cases.md](use_cases.md) - Comprehensive guide to FluxRipper applications
-  - [Retrocomputing & Preservation](use_cases.md#1-retrocomputing--preservation) - Archival rigs, exotic formats
-  - [Copy Protection & Forensics](use_cases.md#2-copy-protection-forensics--analysis) - Protection analysis, disk authenticity
-  - [Hardware R&D](use_cases.md#3-drive-characterization--hardware-rd) - Drive characterization, media studies
-  - [Software Development](use_cases.md#4-software--os--driver-development) - Driver testing, CI/CD integration
-  - [Live Tools](use_cases.md#5-disk-to-disk--live-tools) - Smart copiers, network analyzers
-  - [Teaching & Research](use_cases.md#6-teaching--research) - Lab exercises, ML datasets
-  - [Emulation & Hybrid](use_cases.md#7-emulation--hybrid-systems) - Live bridges, ISA integration
+- [use-cases.md](use-cases.md) - Comprehensive guide to FluxRipper applications
+  - [Retrocomputing & Preservation](use-cases.md#1-retrocomputing--preservation) - Archival rigs, exotic formats
+  - [Copy Protection & Forensics](use-cases.md#2-copy-protection-forensics--analysis) - Protection analysis, disk authenticity
+  - [Hardware R&D](use-cases.md#3-drive-characterization--hardware-rd) - Drive characterization, media studies
+  - [Software Development](use-cases.md#4-software--os--driver-development) - Driver testing, CI/CD integration
+  - [Live Tools](use-cases.md#5-disk-to-disk--live-tools) - Smart copiers, network analyzers
+  - [Teaching & Research](use-cases.md#6-teaching--research) - Lab exercises, ML datasets
+  - [Emulation & Hybrid](use-cases.md#7-emulation--hybrid-systems) - Live bridges, ISA integration
 
 ### RTL Module Structure
 ```
@@ -363,7 +367,7 @@ vivado -mode batch -source scripts/program_fpga.tcl
 openocd -f debug/openocd_fluxripper.cfg -c "init; fluxripper_test; shutdown"
 ```
 
-See [BRINGUP_GUIDE.md](BRINGUP_GUIDE.md) for detailed hardware bring-up procedures.
+See [bringup-guide.md](bringup-guide.md) for detailed hardware bring-up procedures.
 
 ### Synthesis (Vivado GUI)
 1. Open Vivado 2024.1 or later (for SCU35 support)

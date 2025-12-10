@@ -1,19 +1,19 @@
 # FluxRipper USB 2.0 High-Speed Design
 
 **Created:** 2025-12-06 10:59
-**Updated:** 2025-12-07 10:22
+**Updated:** 2025-12-07
 **Status:** Implementation Complete - MIT Licensed (v1.1.0)
 
 ---
 
 ## Overview
 
-Replace FT601 USB 3.0 FIFO bridge with soft USB 2.0 HS device core + external ULPI PHY. This enables:
+FluxRipper uses a soft USB 2.0 HS device core with an external ULPI PHY (USB3320). This design provides:
 
 - **True device emulation** - Custom VID/PID for each personality
 - **Control transfer support** - Required for KryoFlux DTC compatibility
 - **Protocol flexibility** - Native HxC streaming protocol support
-- **Cost reduction** - ~$2 PHY vs ~$8 FT601
+- **Cost-effective** - ~$2 ULPI PHY
 
 ---
 
@@ -29,13 +29,13 @@ Replace FT601 USB 3.0 FIFO bridge with soft USB 2.0 HS device core + external UL
 
 **Note:** There is no `ultraembedded/core_usb` repo. The USB device logic is split across repos.
 
-### Verified USB3300 Path
+### Verified USB3320 Path
 
 ```
-USB3300 (ULPI PHY) → core_ulpi_wrapper → UTMI → usb_device
+USB3320 (ULPI PHY) → core_ulpi_wrapper → UTMI → usb_device
 ```
 
-The `core_ulpi_wrapper` is tested with USB3300 in device mode.
+The `core_ulpi_wrapper` is tested with USB3320 in device mode.
 
 ### HS vs FS Bandwidth Analysis
 
@@ -49,7 +49,7 @@ The `core_ulpi_wrapper` is tested with USB3300 in device mode.
 ### Options for High-Speed
 
 1. **Use `core_usb_cdc` (HS/FS)** - Claims HS support, but CDC protocol may not fit KryoFlux/HxC
-2. **Modify `usb_device` for HS** - Needs testing, may work since USB3300 handles HS PHY
+2. **Modify `usb_device` for HS** - Needs testing, may work since USB3320 handles HS PHY
 3. **LUNA (Amaranth)** - Full HS support, requires HDL conversion or wrapper
 4. **Write custom HS core** - Most flexible, most effort
 
@@ -60,7 +60,7 @@ The `core_ulpi_wrapper` is tested with USB3300 in device mode.
 - May be sufficient for KryoFlux (commands via control transfers are low bandwidth)
 
 **Phase 2:** Test HS operation
-- The USB3300 handles HS signaling in hardware
+- The USB3320 handles HS signaling in hardware
 - The device core may work at HS even if not explicitly tested
 
 **Phase 3:** If HS fails, evaluate:
@@ -87,7 +87,7 @@ rtl/external/
 
 From `README.md`:
 > "This enables support of USB LS (1.5mbps), FS (12mbps) and HS (480mbps) transfers."
-> "Tested against SMSC/Microchip USB3300 in device mode"
+> "Tested against SMSC/Microchip USB3320 in device mode"
 
 - **88 LUTs** on Spartan-6
 - GPL licensed
@@ -180,9 +180,9 @@ localparam STATE_HIGHSPEED      = 3'd5;
                               USB 2.0 HS (480 Mbps)
                                    │
 ┌──────────────────────────────────┼──────────────────────────────────────┐
-│                            USB3300 ULPI PHY (~$1.50)                    │
+│                            USB3320 ULPI PHY (~$3.50)                    │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │  USB3300-EZK (QFN-32)                                              │ │
+│  │  USB3320C-EZK (QFN-32)                                             │ │
 │  │  - USB 2.0 HS/FS/LS transceiver                                    │ │
 │  │  - ULPI interface (8-bit data + 4 control)                         │ │
 │  │  - Integrated 12 MHz crystal oscillator option                     │ │
@@ -377,7 +377,7 @@ Custom modules created as reference/fallback:
 | ulpi_stp | 1 | FPGA→PHY | Stop/end of packet |
 | ulpi_rst_n | 1 | FPGA→PHY | PHY reset |
 
-### ULPI Register Map (USB3300)
+### ULPI Register Map (USB3320)
 
 | Addr | Register | Description |
 |------|----------|-------------|
@@ -416,10 +416,10 @@ create_clock -period 16.667 -name ulpi_clk [get_ports ulpi_clk]
 
 ---
 
-## USB3300 Schematic (Key Connections)
+## USB3320 Schematic (Key Connections)
 
 ```
-                    USB3300-EZK
+                    USB3320C-EZK
                    ┌───────────┐
         USB D+ ────┤DP         │
         USB D- ────┤DM         │
@@ -461,8 +461,6 @@ XTAL: 12 MHz crystal (or external 12 MHz clock)
 | hxc_stream_handler.v | ~200 | ~150 | 0 | Stream markers |
 | **Total USB Core** | **~2,700** | **~1,750** | **2** | |
 
-Current FT601 interface uses ~1,100 LUTs, so net increase of ~1,600 LUTs.
-
 ---
 
 ## Implementation Phases
@@ -471,7 +469,7 @@ Current FT601 interface uses ~1,100 LUTs, so net increase of ~1,600 LUTs.
 - ulpi_phy.v - Basic ULPI communication
 - Register read/write
 - Reset and initialization sequence
-- Verify with USB3300 datasheet
+- Verify with USB3320 datasheet
 
 ### Phase 2: USB Device Core
 - Packet tokenizer and handler
@@ -501,16 +499,15 @@ Current FT601 interface uses ~1,100 LUTs, so net increase of ~1,600 LUTs.
 
 ---
 
-## Bill of Materials Delta
+## Bill of Materials (USB Interface)
 
-| Item | Old (FT601) | New (USB HS) | Delta |
-|------|-------------|--------------|-------|
-| FT601Q-T | $8.00 | - | -$8.00 |
-| USB3300-EZK | - | $1.50 | +$1.50 |
-| 12 MHz Crystal | - | $0.20 | +$0.20 |
-| 12.1k 1% Resistor | - | $0.02 | +$0.02 |
-| Decoupling caps | $0.10 | $0.10 | $0.00 |
-| **Total** | **$8.10** | **$1.82** | **-$6.28** |
+| Item | Cost | Notes |
+|------|------|-------|
+| USB3320C-EZK | $3.50 | ULPI PHY (QFN-32) |
+| 12 MHz Crystal | $0.20 | PHY reference clock |
+| 12.1k 1% Resistor | $0.02 | RBIAS for HS current |
+| Decoupling caps | $0.10 | 100nF on each VDD |
+| **Total** | **$3.82** | |
 
 ---
 
@@ -520,7 +517,7 @@ Current FT601 interface uses ~1,100 LUTs, so net increase of ~1,600 LUTs.
 |------|--------|------------|
 | USB compliance | Medium | Use proven open-source core, test with USB-IF tools |
 | Timing closure | Low | 60 MHz is easy, add constraints early |
-| PHY compatibility | Low | USB3300 is well-documented, widely used |
+| PHY compatibility | Low | USB3320 is well-documented, widely used |
 | Host driver issues | Medium | Test with actual GW/HxC/KF software early |
 
 ---
@@ -528,7 +525,7 @@ Current FT601 interface uses ~1,100 LUTs, so net increase of ~1,600 LUTs.
 ## References
 
 1. ULPI Specification v1.1 - https://www.ulpi.org
-2. USB3300 Datasheet - Microchip/SMSC
+2. USB3320 Datasheet - Microchip/SMSC
 3. ultraembedded/core_usb - https://github.com/ultraembedded/core_usb
 4. USB 2.0 Specification - usb.org
 5. OpenDTC KryoFlux RE - https://github.com/zeldin/OpenDTC
@@ -583,7 +580,7 @@ The following sections document the actual implementation of the USB 2.0 HS stac
                     │
                     ▼
         ┌───────────────────────┐
-        │   USB3300/USB3320     │
+        │      USB3320          │
         │     ULPI PHY          │
         │     60 MHz            │
         └───────────────────────┘
