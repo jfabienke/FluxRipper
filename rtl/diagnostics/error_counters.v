@@ -190,9 +190,9 @@ module track_error_stats #(
                     track_errors[current_track] <= track_errors[current_track] + 1;
 
                     // Update worst track if this is now the worst
-                    if (track_errors[current_track] + 1 > worst_count_reg[7:0]) begin
+                    if (track_errors[current_track] + 8'd1 > worst_count_reg[7:0]) begin
                         worst_track_reg <= current_track;
-                        worst_count_reg <= {8'd0, track_errors[current_track] + 1};
+                        worst_count_reg <= {8'd0, track_errors[current_track] + 8'd1};
                     end
                 end
             end

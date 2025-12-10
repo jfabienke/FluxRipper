@@ -52,9 +52,9 @@ module usb_device_core #(
     //=========================================================================
     // Endpoint 0 (Control) Interface
     //=========================================================================
-    // Setup packet received
+    // Setup packet received (8 bytes as packed vector)
     output reg         ep0_setup_valid,
-    output reg  [7:0]  ep0_setup_data [0:7],  // 8-byte SETUP packet
+    output reg  [63:0] ep0_setup_data,        // 8-byte SETUP packet packed
 
     // Control IN data (device to host)
     input  wire [7:0]  ep0_in_data,
@@ -466,10 +466,10 @@ module usb_device_core #(
                     for (i = 0; i < 8; i = i + 1)
                         setup_packet[i] <= rx_buffer[i];
 
-                    // Signal setup packet received
+                    // Signal setup packet received (pack into 64-bit vector)
                     ep0_setup_valid <= 1'b1;
-                    for (i = 0; i < 8; i = i + 1)
-                        ep0_setup_data[i] <= rx_buffer[i];
+                    ep0_setup_data <= {rx_buffer[7], rx_buffer[6], rx_buffer[5], rx_buffer[4],
+                                       rx_buffer[3], rx_buffer[2], rx_buffer[1], rx_buffer[0]};
 
                     // Decode for vendor requests
                     vendor_req_type <= rx_buffer[0];

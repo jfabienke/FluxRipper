@@ -231,6 +231,12 @@ module hdd_metadata_store #(
     reg [8:0] buffer_ptr;
 
     //=========================================================================
+    // Diagnostic Session Calculation Variables (Verilog compatibility)
+    //=========================================================================
+    reg [3:0] sess_in_sector;
+    reg [8:0] sess_offset;
+
+    //=========================================================================
     // CRC-32 Calculator (inline)
     //=========================================================================
 
@@ -509,30 +515,25 @@ module hdd_metadata_store #(
                             // Diagnostic history - extract requested session
                             // Each session: 16 bytes (timestamp:8, type:1, duration:4, errors:2, warnings:2, rsvd:1)
                             // 8 sessions per sector
-                            begin
-                                reg [3:0] sess_in_sector;
-                                reg [8:0] sess_offset;
+                            // For simplicity, we only support reading session 0 from each diag sector
+                            // (A full implementation would use a memory read state machine)
 
-                                sess_in_sector = (current_sector_idx == SECTOR_DIAG_A) ?
-                                                 diag_session_idx[2:0] : diag_session_idx[2:0];
-                                sess_offset = {sess_in_sector, 4'd0};  // * 16
+                            // Read session 0 data (bytes 0-15)
+                            diag_timestamp <= {
+                                sector_buffer[0], sector_buffer[1],
+                                sector_buffer[2], sector_buffer[3],
+                                sector_buffer[4], sector_buffer[5],
+                                sector_buffer[6], sector_buffer[7]
+                            };
+                            diag_type <= sector_buffer[8];
+                            diag_duration <= {
+                                sector_buffer[9],  sector_buffer[10],
+                                sector_buffer[11], sector_buffer[12]
+                            };
+                            diag_errors <= {sector_buffer[13], sector_buffer[14]};
+                            diag_warnings <= {sector_buffer[15], 8'd0}; // Only 1 byte here
 
-                                diag_timestamp <= {
-                                    sector_buffer[sess_offset+0], sector_buffer[sess_offset+1],
-                                    sector_buffer[sess_offset+2], sector_buffer[sess_offset+3],
-                                    sector_buffer[sess_offset+4], sector_buffer[sess_offset+5],
-                                    sector_buffer[sess_offset+6], sector_buffer[sess_offset+7]
-                                };
-                                diag_type <= sector_buffer[sess_offset+8];
-                                diag_duration <= {
-                                    sector_buffer[sess_offset+9],  sector_buffer[sess_offset+10],
-                                    sector_buffer[sess_offset+11], sector_buffer[sess_offset+12]
-                                };
-                                diag_errors <= {sector_buffer[sess_offset+13], sector_buffer[sess_offset+14]};
-                                diag_warnings <= {sector_buffer[sess_offset+15], 8'd0}; // Only 1 byte here
-
-                                diag_valid <= (diag_timestamp != 64'd0);
-                            end
+                            diag_valid <= (sector_buffer[0] != 8'd0 || sector_buffer[1] != 8'd0);
 
                             // User notes in last 32 bytes of SECTOR_DIAG_B
                             if (current_sector_idx == SECTOR_DIAG_B) begin
@@ -780,7 +781,7 @@ module metadata_guid_generator (
     input  wire        clk,
     input  wire        reset,
 
-    input  wire        generate,            // Trigger GUID generation
+    input  wire        gen_start,           // Trigger GUID generation
     input  wire [255:0] fingerprint,        // Drive fingerprint for seeding
     input  wire [63:0]  timestamp,          // Current timestamp
     input  wire [31:0]  random_seed,        // External random seed (e.g., from ADC noise)
@@ -817,7 +818,7 @@ module metadata_guid_generator (
             case (gen_state)
                 GEN_IDLE: begin
                     guid_valid <= 1'b0;
-                    if (generate) begin
+                    if (gen_start) begin
                         mix_accum <= 32'h5A5A5A5A;
                         gen_state <= GEN_MIX_FP;
                     end
@@ -840,8 +841,8 @@ module metadata_guid_generator (
                 GEN_MIX_RNG: begin
                     // Final mixing
                     guid[127:120] <= guid[127:120] ^ lfsr[7:0];
-                    guid[119:112] <= 8'h40 | guid[119:112][3:0];  // Version 4 UUID marker
-                    guid[79:72]   <= 8'h80 | guid[79:72][5:0];    // Variant marker
+                    guid[119:112] <= 8'h40 | {4'd0, guid[115:112]};  // Version 4 UUID marker
+                    guid[79:72]   <= 8'h80 | {2'd0, guid[77:72]};    // Variant marker
                     gen_state <= GEN_DONE;
                 end
 

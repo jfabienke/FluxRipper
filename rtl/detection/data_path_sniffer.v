@@ -87,7 +87,7 @@ module data_path_sniffer (
     reg [15:0] settle_counter;
     reg        capture_mode;             // Latched sniff_mode
 
-    localparam [15:0] SETTLE_TIME = 16.d3000;  // 10µs settling time
+    localparam [15:0] SETTLE_TIME = 16'd3000;  // 10µs settling time
 
     //-------------------------------------------------------------------------
     // Sub-Module Interfaces

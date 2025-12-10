@@ -101,10 +101,10 @@ module esdi_encoder (
 
     always @(*) begin
         case (data_rate)
-            2.d0: bit_period = 6.d30;    // 10 Mbps
-            2.d1: bit_period = 6.d20;    // 15 Mbps
-            2.d2: bit_period = 6.d15;    // 20 Mbps
-            2.d3: bit_period = 6.d13;    // 24 Mbps
+            2'd0: bit_period = 6'd30;    // 10 Mbps
+            2'd1: bit_period = 6'd20;    // 15 Mbps
+            2'd2: bit_period = 6'd15;    // 20 Mbps
+            2'd3: bit_period = 6'd13;    // 24 Mbps
         endcase
     end
 

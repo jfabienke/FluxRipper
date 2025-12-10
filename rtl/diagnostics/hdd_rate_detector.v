@@ -52,21 +52,21 @@ module hdd_rate_detector (
     // 10 Mbps:  bit cell = 100ns,  min pulse = 200ns = 80 clocks
     // 15 Mbps:  bit cell = 67ns,   min pulse = 133ns = 53 clocks
 
-    localparam [15:0] PW_5M_MIN       = 16.d105;   // 5 Mbps minimum (with tolerance)
-    localparam [15:0] PW_5M_MAX       = 16.d270;   // 5 Mbps maximum
-    localparam [15:0] PW_5M_PEAK      = 16.d120;   // 5 Mbps typical peak (2T)
+    localparam [15:0] PW_5M_MIN       = 16'd105;   // 5 Mbps minimum (with tolerance)
+    localparam [15:0] PW_5M_MAX       = 16'd270;   // 5 Mbps maximum
+    localparam [15:0] PW_5M_PEAK      = 16'd120;   // 5 Mbps typical peak (2T)
 
-    localparam [15:0] PW_7_5M_MIN     = 16.d68;    // 7.5 Mbps minimum
-    localparam [15:0] PW_7_5M_MAX     = 16.d300;   // 7.5 Mbps maximum (RLL 7T)
-    localparam [15:0] PW_7_5M_PEAK    = 16.d80;   // 7.5 Mbps typical peak
+    localparam [15:0] PW_7_5M_MIN     = 16'd68;    // 7.5 Mbps minimum
+    localparam [15:0] PW_7_5M_MAX     = 16'd300;   // 7.5 Mbps maximum (RLL 7T)
+    localparam [15:0] PW_7_5M_PEAK    = 16'd80;   // 7.5 Mbps typical peak
 
-    localparam [15:0] PW_10M_MIN      = 16.d49;    // 10 Mbps minimum
-    localparam [15:0] PW_10M_MAX      = 16.d210;   // 10 Mbps maximum
-    localparam [15:0] PW_10M_PEAK     = 16.d60;    // 10 Mbps typical peak
+    localparam [15:0] PW_10M_MIN      = 16'd49;    // 10 Mbps minimum
+    localparam [15:0] PW_10M_MAX      = 16'd210;   // 10 Mbps maximum
+    localparam [15:0] PW_10M_PEAK     = 16'd60;    // 10 Mbps typical peak
 
-    localparam [15:0] PW_15M_MIN      = 16.d30;    // 15 Mbps minimum
-    localparam [15:0] PW_15M_MAX      = 16.d143;   // 15 Mbps maximum
-    localparam [15:0] PW_15M_PEAK     = 16.d40;    // 15 Mbps typical peak
+    localparam [15:0] PW_15M_MIN      = 16'd30;    // 15 Mbps minimum
+    localparam [15:0] PW_15M_MAX      = 16'd143;   // 15 Mbps maximum
+    localparam [15:0] PW_15M_PEAK     = 16'd40;    // 15 Mbps typical peak
 
     // Rate codes
     localparam [2:0] RATE_UNKNOWN = 3'd0;
@@ -91,7 +91,7 @@ module hdd_rate_detector (
     //-------------------------------------------------------------------------
     // Sample Collection
     //-------------------------------------------------------------------------
-    localparam [23:0] COLLECT_WINDOW    = 24.d3_000_000;  // 10ms @ 300 MHz
+    localparam [23:0] COLLECT_WINDOW    = 24'd3_000_000;  // 10ms @ 300 MHz
     localparam [15:0] MAX_SAMPLES = 16'd16384;
 
     reg [23:0] collect_counter;

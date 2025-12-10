@@ -83,8 +83,9 @@ module msc_scsi_engine #(
     input  wire [MAX_LUNS-1:0] lun_present,
     input  wire [MAX_LUNS-1:0] lun_removable,
     input  wire [MAX_LUNS-1:0] lun_readonly,
-    input  wire [31:0] lun_capacity [0:MAX_LUNS-1],   // Sectors per LUN
-    input  wire [15:0] lun_block_size [0:MAX_LUNS-1], // Bytes per sector
+    output reg  [2:0]  lun_query_sel,                 // Which LUN to query
+    input  wire [31:0] lun_capacity_sel,              // Capacity of selected LUN
+    input  wire [15:0] lun_block_size_sel,            // Block size of selected LUN
 
     //=========================================================================
     // Status
@@ -387,15 +388,18 @@ module msc_scsi_engine #(
                 end
 
                 ST_READ_CAP: begin
+                    // Set LUN query selection
+                    lun_query_sel <= scsi_lun;
+
                     // READ_CAPACITY_10 response (8 bytes = 2 words)
-                    // Last LBA (big-endian)
-                    resp_buffer[0] <= {lun_capacity[scsi_lun][7:0],
-                                       lun_capacity[scsi_lun][15:8],
-                                       lun_capacity[scsi_lun][23:16],
-                                       lun_capacity[scsi_lun][31:24]};
+                    // Last LBA (big-endian) - uses selected LUN data
+                    resp_buffer[0] <= {lun_capacity_sel[7:0],
+                                       lun_capacity_sel[15:8],
+                                       lun_capacity_sel[23:16],
+                                       lun_capacity_sel[31:24]};
                     // Block size (big-endian, typically 512 = 0x00000200)
-                    resp_buffer[1] <= {lun_block_size[scsi_lun][7:0],
-                                       lun_block_size[scsi_lun][15:8],
+                    resp_buffer[1] <= {lun_block_size_sel[7:0],
+                                       lun_block_size_sel[15:8],
                                        8'h00, 8'h00};
 
                     resp_word_count <= 4'd2;
@@ -405,13 +409,14 @@ module msc_scsi_engine #(
                 end
 
                 ST_READ_10: begin
+                    lun_query_sel <= scsi_lun;
                     drive_lba <= rw10_lba;
                     drive_sector_count <= rw10_count;
                     drive_read_req <= 1'b1;
 
                     // Check for write-protected on write commands (not applicable here)
                     // Check LBA range
-                    if (rw10_lba + rw10_count > lun_capacity[scsi_lun]) begin
+                    if (rw10_lba + rw10_count > lun_capacity_sel) begin
                         sense_key <= SK_ILLEGAL_REQUEST;
                         asc <= ASC_LBA_OUT_OF_RANGE;
                         scsi_status <= STATUS_CHECK_CONDITION;

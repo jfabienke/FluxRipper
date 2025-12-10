@@ -68,12 +68,13 @@ module multipass_capture #(
     output reg                     hist_snapshot,   // Snapshot current histogram
 
     //-------------------------------------------------------------------------
-    // Per-Pass Metadata (directly readable)
+    // Per-Pass Metadata Access (register-based readout)
     //-------------------------------------------------------------------------
-    output reg  [31:0]             pass_flux_count  [0:MAX_PASSES-1], // Flux count per pass
-    output reg  [31:0]             pass_index_time  [0:MAX_PASSES-1], // Index-to-index time
-    output reg  [31:0]             pass_start_time  [0:MAX_PASSES-1], // Capture start timestamp
-    output reg  [ADDR_WIDTH-1:0]   pass_data_size   [0:MAX_PASSES-1], // Bytes written per pass
+    input  wire [PASS_BITS-1:0]    metadata_pass_sel,  // Select which pass to read
+    output wire [31:0]             metadata_flux_count,// Flux count for selected pass
+    output wire [31:0]             metadata_index_time,// Index time for selected pass
+    output wire [31:0]             metadata_start_time,// Start time for selected pass
+    output wire [ADDR_WIDTH-1:0]   metadata_data_size, // Data size for selected pass
 
     //-------------------------------------------------------------------------
     // Statistics
@@ -101,6 +102,20 @@ module multipass_capture #(
 
     reg [3:0] state;
     reg [3:0] next_state;
+
+    //-------------------------------------------------------------------------
+    // Internal Per-Pass Metadata Storage
+    //-------------------------------------------------------------------------
+    reg [31:0]           pass_flux_count [0:MAX_PASSES-1];
+    reg [31:0]           pass_index_time [0:MAX_PASSES-1];
+    reg [31:0]           pass_start_time [0:MAX_PASSES-1];
+    reg [ADDR_WIDTH-1:0] pass_data_size  [0:MAX_PASSES-1];
+
+    // Metadata readout mux
+    assign metadata_flux_count = pass_flux_count[metadata_pass_sel];
+    assign metadata_index_time = pass_index_time[metadata_pass_sel];
+    assign metadata_start_time = pass_start_time[metadata_pass_sel];
+    assign metadata_data_size  = pass_data_size[metadata_pass_sel];
 
     //-------------------------------------------------------------------------
     // Internal Registers
@@ -435,9 +450,10 @@ module multipass_capture_regs #(
     input  wire [31:0] mp_max_flux,
     input  wire [31:0] mp_total_time,
 
-    // Per-pass metadata access
-    input  wire [31:0] pass_flux_count [0:MAX_PASSES-1],
-    input  wire [31:0] pass_index_time [0:MAX_PASSES-1]
+    // Per-pass metadata access (via selection register)
+    output reg  [PASS_BITS-1:0] mp_metadata_sel,
+    input  wire [31:0] mp_metadata_flux,
+    input  wire [31:0] mp_metadata_index_time
 );
 
     assign reg_ready = 1'b1;  // Single-cycle access
@@ -450,19 +466,18 @@ module multipass_capture_regs #(
     // 0x10: Min Flux Count (R)
     // 0x14: Max Flux Count (R)
     // 0x18: Total Capture Time (R)
-    // 0x20-0x9F: Pass Flux Count [0-31] (R)
-    // 0xA0-0x11F: Pass Index Time [0-31] (R)
-
-    // Read multiplexer for pass arrays
-    wire [4:0] pass_index = reg_addr[6:2];  // For 0x20+ addresses
+    // 0x1C: Metadata Pass Select (RW) - Select which pass to read
+    // 0x20: Selected Pass Flux Count (R)
+    // 0x24: Selected Pass Index Time (R)
 
     always @(posedge clk) begin
         if (reset) begin
-            mp_start      <= 1'b0;
-            mp_abort      <= 1'b0;
-            mp_pass_count <= 6'd8;  // Default 8 passes
-            mp_base_addr  <= {ADDR_WIDTH{1'b0}};
-            reg_rdata     <= 32'd0;
+            mp_start        <= 1'b0;
+            mp_abort        <= 1'b0;
+            mp_pass_count   <= 6'd8;  // Default 8 passes
+            mp_base_addr    <= {ADDR_WIDTH{1'b0}};
+            mp_metadata_sel <= {PASS_BITS{1'b0}};
+            reg_rdata       <= 32'd0;
         end else begin
             // Auto-clear pulses
             mp_start <= 1'b0;
@@ -476,6 +491,7 @@ module multipass_capture_regs #(
                         mp_pass_count <= reg_wdata[7:2];
                     end
                     8'h08: mp_base_addr <= reg_wdata[ADDR_WIDTH-1:0];
+                    8'h1C: mp_metadata_sel <= reg_wdata[PASS_BITS-1:0];
                 endcase
             end
 
@@ -489,17 +505,10 @@ module multipass_capture_regs #(
                     8'h10: reg_rdata <= mp_min_flux;
                     8'h14: reg_rdata <= mp_max_flux;
                     8'h18: reg_rdata <= mp_total_time;
-                    default: begin
-                        if (reg_addr >= 8'h20 && reg_addr < 8'hA0) begin
-                            // Pass flux count array
-                            reg_rdata <= pass_flux_count[pass_index];
-                        end else if (reg_addr >= 8'hA0) begin
-                            // Pass index time array
-                            reg_rdata <= pass_index_time[pass_index];
-                        end else begin
-                            reg_rdata <= 32'd0;
-                        end
-                    end
+                    8'h1C: reg_rdata <= {{(32-PASS_BITS){1'b0}}, mp_metadata_sel};
+                    8'h20: reg_rdata <= mp_metadata_flux;
+                    8'h24: reg_rdata <= mp_metadata_index_time;
+                    default: reg_rdata <= 32'd0;
                 endcase
             end
         end

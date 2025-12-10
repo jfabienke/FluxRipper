@@ -11,14 +11,23 @@
 //   - Two logical devices: FDC (LD0) and WD (LD1)
 //   - Dynamic I/O base and IRQ configuration
 //   - Resource descriptor ROM
+//   - Integration with isa_pnp_sniffer for "Sleep-until-Key" strategy
+//   - Legacy mode support for non-PnP systems
 //
 // PnP Port Map:
 //   0x279 - Address port (write-only)
 //   0xA79 - Write Data port
 //   0x20B - Read Data port (configurable)
 //
+// Integration with Auto-Config:
+//   - Sniffer detects initiation key and signals pnp_key_valid
+//   - Controller starts in ST_WAIT_KEY but legacy I/O remains active
+//   - Upon key detection, transitions to ST_ISOLATION
+//   - Returns to legacy mode via CC_WAIT_FOR_KEY command
+//
 // Author: Claude Code (FluxRipper Project)
 // Date: 2025-12-04 21:55
+// Updated: 2025-12-07 - Added sniffer integration for universal compatibility
 //==============================================================================
 
 `timescale 1ns / 1ps
@@ -56,13 +65,22 @@ module isa_pnp_controller #(
     output reg         wd_activated,
     output reg  [9:0]  wd_io_base,         // Default 0x1F0
     output reg  [9:0]  wd_alt_base,        // Default 0x3F6
-    output reg  [3:0]  wd_irq,             // Default IRQ14
+    output reg  [3:0]  wd_irq,             // Default IRQ14 (AT) / IRQ5 (XT)
+    output reg  [2:0]  wd_dma,             // Default DRQ3 (XT mode)
 
     //=========================================================================
     // Status
     //=========================================================================
     output reg         pnp_configured,     // PnP configuration complete
-    output reg  [7:0]  pnp_csn             // Assigned Card Select Number
+    output reg  [7:0]  pnp_csn,            // Assigned Card Select Number
+
+    //=========================================================================
+    // Auto-Config Integration (Sniffer Interface)
+    //=========================================================================
+    input  wire        pnp_key_valid,      // Sniffer detected valid initiation key
+    input  wire        legacy_mode_req,    // Request return to legacy mode
+    output wire        pnp_config_active,  // In PnP configuration mode
+    output wire        return_to_legacy    // Signal return to Wait-for-Key
 );
 
     //=========================================================================
@@ -135,6 +153,9 @@ module isa_pnp_controller #(
     reg [7:0]  resource_ptr;
     reg        resource_ready;
 
+    // Return to legacy mode signal
+    reg        return_legacy_r;
+
     //=========================================================================
     // ISA Port Decoding
     //=========================================================================
@@ -189,6 +210,7 @@ module isa_pnp_controller #(
             wd_io_base       <= 10'h1F0;
             wd_alt_base      <= 10'h3F6;
             wd_irq           <= 4'd14;
+            wd_dma           <= 3'd3;     // DRQ3 for XT mode
 
             // Key detection
             key_lfsr         <= 8'h6A;
@@ -203,7 +225,26 @@ module isa_pnp_controller #(
             resource_ptr     <= 8'h00;
             resource_ready   <= 1'b0;
 
+            // Legacy return signal
+            return_legacy_r  <= 1'b0;
+
         end else begin
+            // Handle sniffer key detection (external trigger)
+            if (pnp_key_valid && state == ST_WAIT_KEY) begin
+                // Sniffer has validated the 32-byte key
+                // Transition directly to isolation mode
+                state     <= ST_ISOLATION;
+                key_count <= 5'd0;
+                key_lfsr  <= 8'h6A;
+            end
+
+            // Handle external legacy mode request
+            if (legacy_mode_req) begin
+                state           <= ST_WAIT_KEY;
+                return_legacy_r <= 1'b1;
+            end else begin
+                return_legacy_r <= 1'b0;
+            end
             // Default: clear one-shot signals
             resource_ready <= 1'b0;
 
@@ -211,6 +252,14 @@ module isa_pnp_controller #(
                 //-------------------------------------------------------------
                 ST_WAIT_KEY: begin
                     // Wait for 32-byte initiation key
+                    // NOTE: With sniffer integration, key detection is handled by
+                    // isa_pnp_sniffer.v which validates the key and sets pnp_key_valid.
+                    // This internal key detection is kept as fallback/redundancy.
+                    //
+                    // IMPORTANT: While in ST_WAIT_KEY, the card remains ACTIVE in
+                    // legacy mode - responding to default I/O addresses (0x3F0, 0x1F0).
+                    // This ensures compatibility with non-PnP systems.
+
                     if (write_strobe && addr_port_sel) begin
                         if (isa_data_in == key_lfsr) begin
                             key_count <= key_count + 1'b1;
@@ -364,6 +413,8 @@ module isa_pnp_controller #(
                             REG_DMA_SELECT: begin
                                 if (current_ld == 8'h00) begin
                                     fdc_dma <= isa_data_in[2:0];
+                                end else if (current_ld == 8'h01) begin
+                                    wd_dma <= isa_data_in[2:0];
                                 end
                             end
                         endcase
@@ -461,6 +512,8 @@ module isa_pnp_controller #(
                 REG_DMA_SELECT: begin
                     if (current_ld == 8'h00) begin
                         isa_data_out = {5'b0, fdc_dma};
+                    end else if (current_ld == 8'h01) begin
+                        isa_data_out = {5'b0, wd_dma};
                     end else begin
                         isa_data_out = 8'h04;  // No DMA (value 4)
                     end
@@ -476,5 +529,14 @@ module isa_pnp_controller #(
     // Output enable for read data port
     assign isa_data_oe = read_port_sel && !isa_ior_n && !isa_aen &&
                          (state == ST_ISOLATION || state == ST_CONFIG);
+
+    //=========================================================================
+    // Auto-Config Status Outputs
+    //=========================================================================
+    // PnP configuration mode active (isolation or config states)
+    assign pnp_config_active = (state == ST_ISOLATION) || (state == ST_CONFIG);
+
+    // Signal to sniffer/auto-config that we've returned to wait-for-key
+    assign return_to_legacy = return_legacy_r || (state == ST_WAIT_KEY && !pnp_key_valid);
 
 endmodule

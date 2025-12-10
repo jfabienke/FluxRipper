@@ -181,11 +181,11 @@ def test_pll_stability(runner: TestRunner) -> TestResult:
 
 def test_ulpi_registers(runner: TestRunner) -> TestResult:
     """Read ULPI PHY identification registers."""
-    # These are the expected values for USB3300
+    # These are the expected values for USB3320
     expected = [
         (0x00, 0x24),  # Vendor ID low
         (0x01, 0x04),  # Vendor ID high
-        (0x02, 0x04),  # Product ID low (USB3300)
+        (0x02, 0x04),  # Product ID low (USB3320)
     ]
 
     for reg, expected_val in expected:

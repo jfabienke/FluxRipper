@@ -2,9 +2,13 @@
 // WD Controller Command FSM
 //==============================================================================
 // File: wd_command_fsm.v
-// Description: Command state machine for WD1003/WD1006/WD1007 controller
+// Description: Command state machine for WD1002/WD1003/WD1006/WD1007 controller
 //              emulation. Interprets AT-compatible commands and coordinates
 //              with the HDD HAL (seek controller, track buffer).
+//
+// Transfer Modes:
+//   - PIO Mode (AT): CPU-driven REP INSW/OUTSW transfers
+//   - DMA Mode (XT): 8237 DMA channel 3 transfers (WD1002 compatible)
 //
 // Supported Commands:
 //   0x10-0x1F: RESTORE (Recalibrate) - Seek to track 0
@@ -96,6 +100,11 @@ module wd_command_fsm (
     //-------------------------------------------------------------------------
     input  wire [2:0]  wd_variant,        // 0=WD1003, 1=WD1006, 2=WD1007
     input  wire [31:0] wd_features,       // Feature flags
+
+    //-------------------------------------------------------------------------
+    // DMA Mode (XT compatibility)
+    //-------------------------------------------------------------------------
+    input  wire        dma_mode,          // DMA mode enabled (XT uses DMA ch.3)
 
     //-------------------------------------------------------------------------
     // Drive Status

@@ -25,6 +25,9 @@
 //   0x40: TAPE_DETECT_STATUS (r/o) - Detection status and flags
 //   0x44: TAPE_VENDOR_MODEL (r/o) - Detected vendor and model IDs
 //   0x48: TAPE_DRIVE_INFO (r/o) - Drive type, tracks, data rates
+//   0x4C: TAPE_DATA_FIFO (r/o) - Tape data FIFO read port
+//   0x50: TAPE_DATA_STATUS (r/o) - Tape data streaming status
+//   0x54: TAPE_BLOCK_INFO (r/o) - Current block header and position
 //
 // Target: AMD Spartan UltraScale+ (SCU35)
 // Updated: 2025-12-10
@@ -168,7 +171,26 @@ module axi_fdc_periph #(
     input  wire [7:0]  tape_detected_config,    // Drive configuration byte
     input  wire [3:0]  tape_detected_type,      // Drive type enum
     input  wire [4:0]  tape_detected_max_tracks,// Max tracks supported
-    input  wire [1:0]  tape_detected_rates      // Supported data rates bitmap
+    input  wire [1:0]  tape_detected_rates,     // Supported data rates bitmap
+
+    //-------------------------------------------------------------------------
+    // Tape Data Streaming Interface (from qic117_data_streamer)
+    //-------------------------------------------------------------------------
+    input  wire [7:0]  tape_data_byte,          // Data byte from streamer
+    input  wire        tape_data_valid,         // Data byte valid strobe
+    input  wire        tape_data_is_header,     // Byte is block header
+    input  wire        tape_data_is_ecc,        // Byte is ECC data
+    input  wire [7:0]  tape_block_header,       // Current block header byte
+    input  wire [8:0]  tape_byte_in_block,      // Byte position in block (0-511)
+    input  wire [4:0]  tape_block_in_segment,   // Block number in segment (0-31)
+    input  wire        tape_block_complete,     // Block complete pulse
+    input  wire        tape_segment_complete,   // Segment complete pulse
+    input  wire [15:0] tape_segment_count,      // Total segments captured
+    input  wire [15:0] tape_good_blocks,        // Good blocks captured
+    input  wire [15:0] tape_error_count,        // Error count
+    input  wire        tape_is_file_mark,       // Current block is file mark
+    input  wire        tape_is_eod,             // Current block is EOD
+    input  wire        tape_streaming           // Tape is currently streaming
 );
 
     //-------------------------------------------------------------------------
@@ -194,6 +216,9 @@ module axi_fdc_periph #(
     localparam ADDR_TAPE_DETECT_STATUS = 7'h40;   // Detection status/flags
     localparam ADDR_TAPE_VENDOR_MODEL  = 7'h44;   // Vendor and model IDs
     localparam ADDR_TAPE_DRIVE_INFO    = 7'h48;   // Drive type, tracks, rates
+    localparam ADDR_TAPE_DATA_FIFO     = 7'h4C;   // Tape data FIFO read port
+    localparam ADDR_TAPE_DATA_STATUS   = 7'h50;   // Tape data streaming status
+    localparam ADDR_TAPE_BLOCK_INFO    = 7'h54;   // Current block info
 
     //-------------------------------------------------------------------------
     // AXI4-Lite State Machine
@@ -362,6 +387,85 @@ module axi_fdc_periph #(
         tape_detected_max_tracks            // [4:0] max tracks
     };
 
+    //-------------------------------------------------------------------------
+    // Tape Data FIFO (for streaming capture)
+    //-------------------------------------------------------------------------
+    localparam TAPE_FIFO_DEPTH = 512;
+    localparam TAPE_FIFO_BITS  = 9;
+
+    reg  [7:0]  tape_fifo_mem [0:TAPE_FIFO_DEPTH-1];
+    reg  [TAPE_FIFO_BITS-1:0] tape_fifo_wr_ptr;
+    reg  [TAPE_FIFO_BITS-1:0] tape_fifo_rd_ptr;
+    reg  [TAPE_FIFO_BITS:0]   tape_fifo_count;
+    wire        tape_fifo_full  = (tape_fifo_count == TAPE_FIFO_DEPTH);
+    wire        tape_fifo_empty = (tape_fifo_count == 0);
+    reg         tape_fifo_overflow;
+
+    // FIFO write logic - capture incoming tape data
+    always @(posedge s_axi_aclk) begin
+        if (!s_axi_aresetn) begin
+            tape_fifo_wr_ptr   <= {TAPE_FIFO_BITS{1'b0}};
+            tape_fifo_overflow <= 1'b0;
+        end else if (tape_data_valid && tape_mode_en) begin
+            if (!tape_fifo_full) begin
+                tape_fifo_mem[tape_fifo_wr_ptr] <= tape_data_byte;
+                tape_fifo_wr_ptr <= tape_fifo_wr_ptr + 1'b1;
+            end else begin
+                tape_fifo_overflow <= 1'b1;
+            end
+        end
+    end
+
+    // FIFO read pointer advances on register read
+    reg tape_fifo_read_pending;
+
+    // Tape data status register (read-only)
+    // [31]    = streaming active
+    // [30]    = FIFO overflow
+    // [29]    = FIFO full
+    // [28]    = FIFO empty
+    // [27]    = is file mark
+    // [26]    = is EOD
+    // [25:16] = FIFO level
+    // [15:0]  = good block count
+    wire [31:0] tape_data_status_value = {
+        tape_streaming,                     // [31] streaming
+        tape_fifo_overflow,                 // [30] overflow
+        tape_fifo_full,                     // [29] full
+        tape_fifo_empty,                    // [28] empty
+        tape_is_file_mark,                  // [27] file mark
+        tape_is_eod,                        // [26] EOD
+        tape_fifo_count[9:0],               // [25:16] FIFO level
+        tape_good_blocks                    // [15:0] good blocks
+    };
+
+    // Tape block info register (read-only)
+    // [31:24] = block header byte
+    // [23:21] = reserved
+    // [20:16] = block in segment (0-31)
+    // [15:9]  = reserved
+    // [8:0]   = byte in block (0-511)
+    wire [31:0] tape_block_info_value = {
+        tape_block_header,                  // [31:24] header
+        3'd0,                               // [23:21] reserved
+        tape_block_in_segment,              // [20:16] block number
+        7'd0,                               // [15:9] reserved
+        tape_byte_in_block                  // [8:0] byte position
+    };
+
+    // FIFO data for read
+    wire [7:0] tape_fifo_rd_data = tape_fifo_mem[tape_fifo_rd_ptr];
+
+    // Tape data FIFO register (read-only, reading advances pointer)
+    // [31:16] = segment count
+    // [15:8]  = error count low byte
+    // [7:0]   = FIFO data byte
+    wire [31:0] tape_data_fifo_value = {
+        tape_segment_count,                 // [31:16] segments
+        tape_error_count[7:0],              // [15:8] errors
+        tape_fifo_rd_data                   // [7:0] data byte
+    };
+
     // TDR output assignments for tape mode
     assign tape_mode_en = tdr_reg[7];
     assign tape_select  = tdr_reg[2:0];
@@ -403,6 +507,11 @@ module axi_fdc_periph #(
             // Detection control
             tape_start_detect   <= 1'b0;
             tape_abort_detect   <= 1'b0;
+
+            // Tape data FIFO
+            tape_fifo_rd_ptr    <= {TAPE_FIFO_BITS{1'b0}};
+            tape_fifo_count     <= {(TAPE_FIFO_BITS+1){1'b0}};
+            tape_fifo_read_pending <= 1'b0;
         end
         else begin
             // Default: deassert one-shot signals
@@ -612,6 +721,20 @@ module axi_fdc_periph #(
                     ADDR_TAPE_DRIVE_INFO[6:2]:
                         axi_rdata_r <= tape_drive_info_value;
 
+                    ADDR_TAPE_DATA_FIFO[6:2]: begin
+                        axi_rdata_r <= tape_data_fifo_value;
+                        // Advance FIFO read pointer on read
+                        if (!tape_fifo_empty) begin
+                            tape_fifo_rd_ptr <= tape_fifo_rd_ptr + 1'b1;
+                        end
+                    end
+
+                    ADDR_TAPE_DATA_STATUS[6:2]:
+                        axi_rdata_r <= tape_data_status_value;
+
+                    ADDR_TAPE_BLOCK_INFO[6:2]:
+                        axi_rdata_r <= tape_block_info_value;
+
                     default:
                         axi_rdata_r <= 32'hDEADBEEF;
                 endcase
@@ -619,6 +742,25 @@ module axi_fdc_periph #(
             else if (axi_rvalid_r && s_axi_rready) begin
                 axi_rvalid_r <= 1'b0;
             end
+        end
+    end
+
+    //-------------------------------------------------------------------------
+    // Tape FIFO Count Management
+    //-------------------------------------------------------------------------
+    always @(posedge s_axi_aclk) begin
+        if (!s_axi_aresetn) begin
+            // Reset handled in main always block
+        end else begin
+            // Update FIFO count based on write and read operations
+            // Write: tape_data_valid && !tape_fifo_full
+            // Read: FIFO register read && !tape_fifo_empty
+            case ({tape_data_valid && tape_mode_en && !tape_fifo_full,
+                   axi_rvalid_r && s_axi_rready && (axi_araddr_r[6:2] == ADDR_TAPE_DATA_FIFO[6:2]) && !tape_fifo_empty})
+                2'b10: tape_fifo_count <= tape_fifo_count + 1'b1;  // Write only
+                2'b01: tape_fifo_count <= tape_fifo_count - 1'b1;  // Read only
+                default: ; // No change or simultaneous
+            endcase
         end
     end
 

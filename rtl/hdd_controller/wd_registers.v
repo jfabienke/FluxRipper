@@ -2,7 +2,7 @@
 // WD Controller Task File Register Model
 //==============================================================================
 // File: wd_registers.v
-// Description: Western Digital WD1003/WD1006/WD1007 compatible task file
+// Description: Western Digital WD1002/WD1003/WD1006/WD1007 compatible task file
 //              register implementation for FluxRipper HDD controller emulation.
 //
 // Register Map (AT-compatible):
@@ -15,8 +15,13 @@
 //   Offset 0x6: SDH         - Size/Drive/Head (R/W)
 //   Offset 0x7: STATUS      - Status register (R) / Command (W)
 //
+// Transfer Modes:
+//   - PIO Mode (AT): CPU-driven REP INSW/OUTSW transfers
+//   - DMA Mode (XT): 8237 DMA channel 3 transfers (WD1002 compatible)
+//
 // Author: Claude Code (FluxRipper Project)
 // Date: 2025-12-04
+// Updated: 2025-12-08 - Added XT DMA channel 3 support
 //==============================================================================
 
 `timescale 1ns / 1ps
@@ -26,7 +31,7 @@ module wd_registers (
     input  wire        reset_n,
 
     //--------------------------------------------------------------------------
-    // Register Interface (from host: ISA, AXI, or PCIe)
+    // Register Interface (from host: ISA or AXI)
     //--------------------------------------------------------------------------
     input  wire [2:0]  reg_addr,        // 3-bit register address (0-7)
     input  wire [7:0]  reg_wdata,       // Write data from host
@@ -91,7 +96,15 @@ module wd_registers (
     //--------------------------------------------------------------------------
     // Sector Count Control (from command FSM)
     //--------------------------------------------------------------------------
-    input  wire        dec_sector_count // Decrement sector count after each sector
+    input  wire        dec_sector_count, // Decrement sector count after each sector
+
+    //--------------------------------------------------------------------------
+    // DMA Mode Support (XT compatibility)
+    //--------------------------------------------------------------------------
+    input  wire        dma_mode,        // DMA mode enabled (1=DMA, 0=PIO)
+    input  wire        dma_ack,         // DMA acknowledge from 8237
+    input  wire        dma_dir,         // DMA direction: 0=read (disk->mem), 1=write (mem->disk)
+    output wire        dma_drq          // DMA request to 8237 (channel 3)
 );
 
 //==============================================================================
@@ -167,12 +180,21 @@ assign sector_count = r_sector_count;
 assign features     = r_features;
 
 // Data FIFO interface - directly connected to data register access
+// In PIO mode: CPU reads/writes trigger FIFO operations
+// In DMA mode: DACK signal from 8237 triggers FIFO operations
+//   dma_dir=0: READ command - disk to memory, FIFO read on DACK
+//   dma_dir=1: WRITE command - memory to disk, FIFO write on DACK
 assign fifo_wdata = reg_wdata;
-assign fifo_wr    = reg_write && (reg_addr == REG_DATA) && !fifo_full;
-assign fifo_rd    = reg_read && (reg_addr == REG_DATA) && !fifo_empty;
+assign fifo_wr    = (dma_mode ? (dma_ack && dma_dir) : (reg_write && (reg_addr == REG_DATA))) && !fifo_full;
+assign fifo_rd    = (dma_mode ? (dma_ack && !dma_dir) : (reg_read && (reg_addr == REG_DATA))) && !fifo_empty;
 
 // Interrupt request
 assign irq_request = r_irq_pending;
+
+// DMA request - asserted when data is ready and DMA mode is enabled
+// In DMA mode, the 8237 DMA controller handles transfers instead of CPU
+// DRQ is asserted when status_drq is set and DMA mode is active
+assign dma_drq = dma_mode && status_drq;
 
 //==============================================================================
 // Register Write Logic

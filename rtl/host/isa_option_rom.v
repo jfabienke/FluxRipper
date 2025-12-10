@@ -44,16 +44,16 @@ module isa_option_rom #(
     input  wire [6:0]  isa_la,            // Latched Address LA[23:17] (directly from ISA LA17-LA23)
 
     // Control signals (directly from ISA connector)
-    input  wire        isa_memr_n,        // Memory Read strobe (directly from ISA -MEMR, directly active low)
-    input  wire        isa_aen,           // Address Enable (directly from ISA AEN, directly high during DMA)
-    input  wire        isa_refresh_n,     // Refresh cycle (directly from ISA -REFRESH, directly ignore when low)
+    input  wire        isa_memr_n,        // Memory Read strobe (active low)
+    input  wire        isa_aen,           // Address Enable (high during DMA)
+    input  wire        isa_refresh_n,     // Refresh cycle (ignore when low)
 
     // Data bus (directly from ISA connector)
     output wire [7:0]  isa_data_out,      // Data to ISA bus
     output wire        isa_data_oe,       // Output enable for data bus tristate
 
     // Ready signal (directly from ISA connector)
-    output wire        isa_mem_ready,     // I/O Channel Ready (directly from ISA I/O CH RDY, directly directly active high)
+    output wire        isa_mem_ready,     // I/O Channel Ready (active high)
 
     //=========================================================================
     // ROM Data Interface (directly from internal BRAM)
@@ -188,12 +188,14 @@ module option_rom_bram #(
     // ROM storage
     (* ram_style = "block" *) reg [7:0] rom [0:ROM_SIZE-1];
 
+    // Loop variable for initialization
+    integer rom_init_i;
+
     // Initialize ROM from file
     initial begin
         // Default: fill with 0xFF (empty EPROM state)
-        integer i;
-        for (i = 0; i < ROM_SIZE; i = i + 1) begin
-            rom[i] = 8'hFF;
+        for (rom_init_i = 0; rom_init_i < ROM_SIZE; rom_init_i = rom_init_i + 1) begin
+            rom[rom_init_i] = 8'hFF;
         end
 
         // Load ROM contents if file exists

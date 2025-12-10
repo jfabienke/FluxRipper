@@ -124,10 +124,11 @@ module mfm_decoder_lut (
 endmodule
 
 //-----------------------------------------------------------------------------
-// MFM Decoder with Sync Detection
+// MFM Decoder with Sync Detection (Parallel Interface)
 // Detects A1 (0x4489) and C2 (0x5224) sync patterns
+// Note: For serial interface, use mfm_decoder_sync below
 //-----------------------------------------------------------------------------
-module mfm_decoder_sync (
+module mfm_decoder_sync_parallel (
     input  wire        clk,
     input  wire        reset,
     input  wire        enable,
@@ -223,6 +224,160 @@ module mfm_decoder_serial (
                     bit_cnt <= 4'd0;
                 end
             end
+        end
+    end
+
+endmodule
+
+//-----------------------------------------------------------------------------
+// MFM Serial Decoder with Sync/AM Detection for encoding_mux.v
+// Combines serial decoding with MFM sync pattern detection
+//
+// Interface matches encoding_mux.v expectations for mfm_decoder_sync
+//
+// MFM Sync patterns (with missing clock):
+//   - A1 sync mark: 0x4489 (detects IDAM/DAM)
+//   - C2 sync mark: 0x5224 (index mark)
+//
+// AM Types:
+//   - 00: No AM
+//   - 01: IDAM (ID Address Mark)
+//   - 10: DAM (Data Address Mark)
+//   - 11: DDAM (Deleted Data Address Mark)
+//
+// Created: 2025-12-07
+//-----------------------------------------------------------------------------
+module mfm_decoder_sync (
+    input  wire        clk,
+    input  wire        reset,
+    input  wire        enable,
+    input  wire        bit_in,          // Serial bit input
+    input  wire        bit_valid,       // Bit valid strobe
+    output reg  [7:0]  data_out,        // Decoded byte
+    output reg         data_valid,      // Byte complete
+    output reg         decode_error,    // Decode error (invalid MFM pattern)
+    output reg         sync_detected,   // A1/C2 sync pattern detected
+    output reg         am_detected,     // Address mark byte detected
+    output reg  [1:0]  am_type          // Address mark type
+);
+
+    //-------------------------------------------------------------------------
+    // MFM Sync Patterns
+    //-------------------------------------------------------------------------
+    localparam [15:0] SYNC_A1 = 16'h4489;  // A1 with missing clock
+    localparam [15:0] SYNC_C2 = 16'h5224;  // C2 with missing clock
+
+    // Address Mark bytes (appear after 3x A1 sync)
+    localparam [7:0] AM_IDAM  = 8'hFE;     // ID Address Mark
+    localparam [7:0] AM_DAM   = 8'hFB;     // Data Address Mark
+    localparam [7:0] AM_DDAM  = 8'hF8;     // Deleted Data Address Mark
+
+    //-------------------------------------------------------------------------
+    // Internal State
+    //-------------------------------------------------------------------------
+    reg [15:0] shift_reg;
+    reg [3:0]  bit_cnt;
+    reg [1:0]  sync_count;     // Count consecutive A1 syncs (need 3 for AM)
+    reg        in_sync;        // Currently synchronized
+    reg        await_am;       // Waiting for AM byte after 3x A1
+
+    //-------------------------------------------------------------------------
+    // Serial Decoding with Sync Detection
+    //-------------------------------------------------------------------------
+    always @(posedge clk) begin
+        if (reset) begin
+            shift_reg     <= 16'h0000;
+            bit_cnt       <= 4'd0;
+            data_out      <= 8'h00;
+            data_valid    <= 1'b0;
+            decode_error  <= 1'b0;
+            sync_detected <= 1'b0;
+            am_detected   <= 1'b0;
+            am_type       <= 2'b00;
+            sync_count    <= 2'd0;
+            in_sync       <= 1'b0;
+            await_am      <= 1'b0;
+        end
+        else if (enable && bit_valid) begin
+            // Default: clear single-cycle outputs
+            data_valid    <= 1'b0;
+            sync_detected <= 1'b0;
+            am_detected   <= 1'b0;
+            decode_error  <= 1'b0;
+
+            // Shift in new bit
+            shift_reg <= {shift_reg[14:0], bit_in};
+            bit_cnt   <= bit_cnt + 1'b1;
+
+            // Check for sync pattern continuously (can appear any time)
+            if (shift_reg[14:0] == SYNC_A1[15:1] && bit_in == SYNC_A1[0]) begin
+                // A1 sync detected
+                sync_detected <= 1'b1;
+                in_sync <= 1'b1;
+                bit_cnt <= 4'd0;  // Reset byte alignment
+
+                if (sync_count < 2'd3)
+                    sync_count <= sync_count + 1'b1;
+
+                // After 3x A1, next byte is address mark
+                if (sync_count == 2'd2) begin
+                    await_am <= 1'b1;
+                end
+            end
+            else if (shift_reg[14:0] == SYNC_C2[15:1] && bit_in == SYNC_C2[0]) begin
+                // C2 sync detected (index mark)
+                sync_detected <= 1'b1;
+                in_sync <= 1'b1;
+                bit_cnt <= 4'd0;
+                sync_count <= 2'd0;  // C2 doesn't chain to AM
+            end
+            else if (bit_cnt == 4'd15) begin
+                // Extract byte from shift register (data bits at odd positions)
+                // MFM encoding: bit15=C7, bit14=D7, bit13=C6, bit12=D6, ...
+                // Data bits are at positions 14,12,10,8,6,4,2,0
+                data_out <= {shift_reg[14], shift_reg[12], shift_reg[10], shift_reg[8],
+                             shift_reg[6],  shift_reg[4],  shift_reg[2],  bit_in};
+                data_valid <= 1'b1;
+                bit_cnt <= 4'd0;
+
+                // Check for address mark if we just got 3x A1
+                if (await_am) begin
+                    await_am <= 1'b0;
+                    am_detected <= 1'b1;
+
+                    // Decode AM type
+                    case ({shift_reg[14], shift_reg[12], shift_reg[10], shift_reg[8],
+                           shift_reg[6],  shift_reg[4],  shift_reg[2],  bit_in})
+                        AM_IDAM:  am_type <= 2'b01;  // ID Address Mark
+                        AM_DAM:   am_type <= 2'b10;  // Data Address Mark
+                        AM_DDAM:  am_type <= 2'b11;  // Deleted Data Address Mark
+                        default:  am_type <= 2'b00;  // Unknown
+                    endcase
+                end
+
+                // Reset sync count if not seeing sync pattern
+                sync_count <= 2'd0;
+
+                // Check for MFM encoding violation
+                // Valid MFM: no two consecutive 1s in encoded stream
+                // Check pairs: bits 15-14, 13-12, etc.
+                if ((shift_reg[15] && shift_reg[14]) ||
+                    (shift_reg[13] && shift_reg[12]) ||
+                    (shift_reg[11] && shift_reg[10]) ||
+                    (shift_reg[9]  && shift_reg[8])  ||
+                    (shift_reg[7]  && shift_reg[6])  ||
+                    (shift_reg[5]  && shift_reg[4])  ||
+                    (shift_reg[3]  && shift_reg[2])  ||
+                    (shift_reg[1]  && bit_in)) begin
+                    decode_error <= 1'b1;
+                end
+            end
+        end
+        else if (!enable) begin
+            // Reset state when disabled
+            sync_count <= 2'd0;
+            in_sync    <= 1'b0;
+            await_am   <= 1'b0;
         end
     end
 

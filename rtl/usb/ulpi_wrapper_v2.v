@@ -33,7 +33,7 @@
 //
 // Description:
 //   Converts UTMI+ interface signals to ULPI reduced pin count interface.
-//   Designed for USB3300/USB3320 PHY in USB device mode.
+//   Designed for USB3320 PHY in USB device mode.
 //
 //   Features:
 //   - UTMI transmit/receive data conversion
@@ -51,7 +51,7 @@
 //-----------------------------------------------------------------------------
 
 module ulpi_wrapper_v2 (
-    // ULPI PHY Interface (directly to USB3300/USB3320 pins)
+    // ULPI PHY Interface (directly to USB3320 pins)
     input  wire        ulpi_clk60_i,       // 60 MHz clock from PHY
     input  wire        ulpi_rst_i,         // Reset (active high)
     input  wire [7:0]  ulpi_data_out_i,    // Data from PHY (directly from pad)

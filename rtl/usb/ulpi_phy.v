@@ -4,7 +4,7 @@
 //
 // Created: 2025-12-06 10:59
 //
-// Interfaces with USB3300/USB3320 ULPI PHY chip for USB 2.0 HS/FS operation.
+// Interfaces with USB3320 ULPI PHY chip for USB 2.0 HS/FS operation.
 // Handles ULPI bus protocol, register access, and packet TX/RX.
 //
 // ULPI Specification: https://www.ulpi.org/
@@ -19,7 +19,7 @@ module ulpi_phy (
     input  wire        ulpi_nxt,       // PHY ready for next byte
     output reg         ulpi_stp,       // Link stop signal
     inout  wire [7:0]  ulpi_data,      // Bidirectional data bus
-    output reg         ulpi_rst_n,     // PHY reset (directly directly driven, directly directly)
+    output reg         ulpi_rst_n,     // PHY reset (directly driven)
 
     // System
     input  wire        rst_n,          // System reset
@@ -73,7 +73,7 @@ module ulpi_phy (
     localparam RXCMD_RX_ERROR    = 2'b11;        // RX error
 
     //=========================================================================
-    // ULPI Register Addresses (USB3300)
+    // ULPI Register Addresses (USB3320)
     //=========================================================================
 
     localparam REG_VID_LOW       = 6'h00;

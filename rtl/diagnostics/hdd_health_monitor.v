@@ -68,7 +68,7 @@ module hdd_health_monitor (
     // 3000 RPM = 6M clocks, 4000 RPM = 4.5M clocks
     // RPM = 60 * 300M / index_period = 18B / index_period
 
-    localparam [31:0] RPM_NUMERATOR = 32.d18_000_000_000;  // 60 * 300M * 10 (for 0.1 RPM resolution)
+    localparam [31:0] RPM_NUMERATOR = 32'd18_000_000_000;  // 60 * 300M * 10 (for 0.1 RPM resolution)
 
     reg [23:0] index_period_counter;
     reg [23:0] index_periods [0:7];      // Store last 8 periods
@@ -92,6 +92,20 @@ module hdd_health_monitor (
 
     // Test cylinder sequence (short, medium, long seeks)
     reg [15:0] seek_test_targets [0:7];
+
+    //-------------------------------------------------------------------------
+    // Calculation Variables (moved from procedural blocks for Verilog compat)
+    //-------------------------------------------------------------------------
+    reg [31:0] calc_avg_period;
+    reg [31:0] calc_min_period;
+    reg [31:0] calc_max_period;
+    reg [31:0] calc_rpm;
+    reg [31:0] calc_seek_sum;
+    reg [3:0]  calc_valid_seeks;
+    integer    calc_i;
+    reg [7:0]  calc_rpm_score;
+    reg [7:0]  calc_seek_score;
+    reg [7:0]  calc_fault_score;
 
     //-------------------------------------------------------------------------
     // Main State Machine
@@ -218,36 +232,28 @@ module hdd_health_monitor (
                 //-------------------------------------------------------------
                 STATE_CALCULATE: begin
                     // Calculate RPM from average period
-                    reg [31:0] avg_period;
-                    reg [31:0] min_period;
-                    reg [31:0] max_period;
-                    reg [31:0] rpm_calc;
-                    reg [31:0] seek_sum;
-                    reg [3:0]  valid_seeks;
-                    integer i;
-
                     // Average index period
-                    avg_period = 32'd0;
-                    min_period = 32'hFFFFFFFF;
-                    max_period = 32'd0;
+                    calc_avg_period = 32'd0;
+                    calc_min_period = 32'hFFFFFFFF;
+                    calc_max_period = 32'd0;
 
-                    for (i = 0; i < 8; i = i + 1) begin
-                        avg_period = avg_period + {8'd0, index_periods[i]};
-                        if ({8'd0, index_periods[i]} < min_period)
-                            min_period = {8'd0, index_periods[i]};
-                        if ({8'd0, index_periods[i]} > max_period)
-                            max_period = {8'd0, index_periods[i]};
+                    for (calc_i = 0; calc_i < 8; calc_i = calc_i + 1) begin
+                        calc_avg_period = calc_avg_period + {8'd0, index_periods[calc_i]};
+                        if ({8'd0, index_periods[calc_i]} < calc_min_period)
+                            calc_min_period = {8'd0, index_periods[calc_i]};
+                        if ({8'd0, index_periods[calc_i]} > calc_max_period)
+                            calc_max_period = {8'd0, index_periods[calc_i]};
                     end
-                    avg_period = avg_period >> 3;  // Divide by 8
+                    calc_avg_period = calc_avg_period >> 3;  // Divide by 8
 
                     // Calculate RPM: 60 * 300M * 10 / period
-                    if (avg_period > 0) begin
-                        rpm_calc = RPM_NUMERATOR / avg_period;
-                        rpm_measured <= rpm_calc[15:0];
+                    if (calc_avg_period > 0) begin
+                        calc_rpm = RPM_NUMERATOR / calc_avg_period;
+                        rpm_measured <= calc_rpm[15:0];
 
                         // Jitter = (max - min) / avg * 256
-                        if (max_period > min_period) begin
-                            rpm_jitter <= ((max_period - min_period) << 8) / avg_period;
+                        if (calc_max_period > calc_min_period) begin
+                            rpm_jitter <= ((calc_max_period - calc_min_period) << 8) / calc_avg_period;
                         end else begin
                             rpm_jitter <= 8'd0;
                         end
@@ -258,18 +264,18 @@ module hdd_health_monitor (
 
                     // Average seek time (in microseconds)
                     // Time in clocks / 300 = microseconds
-                    seek_sum = 32'd0;
-                    valid_seeks = 4'd0;
+                    calc_seek_sum = 32'd0;
+                    calc_valid_seeks = 4'd0;
 
-                    for (i = 0; i < 8; i = i + 1) begin
-                        if (seek_times[i] != 24'hFFFFFF) begin
-                            seek_sum = seek_sum + {8'd0, seek_times[i]};
-                            valid_seeks = valid_seeks + 1;
+                    for (calc_i = 0; calc_i < 8; calc_i = calc_i + 1) begin
+                        if (seek_times[calc_i] != 24'hFFFFFF) begin
+                            calc_seek_sum = calc_seek_sum + {8'd0, seek_times[calc_i]};
+                            calc_valid_seeks = calc_valid_seeks + 1;
                         end
                     end
 
-                    if (valid_seeks > 0) begin
-                        avg_seek_time <= (seek_sum / {28'd0, valid_seeks}) / 16'd400;
+                    if (calc_valid_seeks > 0) begin
+                        avg_seek_time <= (calc_seek_sum / {28'd0, calc_valid_seeks}) / 16'd400;
                     end else begin
                         avg_seek_time <= 16'hFFFF;
                     end
@@ -284,28 +290,22 @@ module hdd_health_monitor (
 
                     // Overall health score
                     // Factors: RPM stability, seek reliability, no faults
-                    begin
-                        reg [7:0] rpm_score;
-                        reg [7:0] seek_score;
-                        reg [7:0] fault_score;
+                    // RPM score: good if jitter < 10
+                    if (rpm_jitter < 8'd10)
+                        calc_rpm_score = 8'd255;
+                    else if (rpm_jitter < 8'd30)
+                        calc_rpm_score = 8'd200;
+                    else if (rpm_jitter < 8'd100)
+                        calc_rpm_score = 8'd128;
+                    else
+                        calc_rpm_score = 8'd64;
 
-                        // RPM score: good if jitter < 10
-                        if (rpm_jitter < 8'd10)
-                            rpm_score = 8'd255;
-                        else if (rpm_jitter < 8'd30)
-                            rpm_score = 8'd200;
-                        else if (rpm_jitter < 8'd100)
-                            rpm_score = 8'd128;
-                        else
-                            rpm_score = 8'd64;
+                    calc_seek_score = seek_reliability;
 
-                        seek_score = seek_reliability;
+                    calc_fault_score = drive_fault ? 8'd0 : 8'd255;
 
-                        fault_score = drive_fault ? 8'd0 : 8'd255;
-
-                        // Weighted average
-                        overall_health <= (rpm_score + seek_score + fault_score) / 8'd3;
-                    end
+                    // Weighted average
+                    overall_health <= (calc_rpm_score + calc_seek_score + calc_fault_score) / 8'd3;
 
                     state <= STATE_DONE;
                 end
@@ -364,7 +364,7 @@ module hdd_decode_tester (
 
     reg [1:0] state;
     reg [23:0] collect_counter;
-    localparam [23:0] COLLECT_TIME = 24.d6_000_000;  // 20ms
+    localparam [23:0] COLLECT_TIME = 24'd6_000_000;  // 20ms
 
     //-------------------------------------------------------------------------
     // Pattern Detection

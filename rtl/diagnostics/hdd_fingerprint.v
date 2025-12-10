@@ -201,6 +201,12 @@ module hdd_fingerprint (
     //-------------------------------------------------------------------------
     reg [31:0] hash_accum;
 
+    // Temporary variables for calculations (moved from procedural blocks for Verilog compatibility)
+    reg [31:0] avg_period_calc;
+    reg [31:0] mean_calc;
+    reg [31:0] variance_calc;
+    reg [7:0]  conf_calc;
+
     //-------------------------------------------------------------------------
     // Initialization
     //-------------------------------------------------------------------------
@@ -576,17 +582,16 @@ module hdd_fingerprint (
                         STAGE_RPM_MEASURE: begin
                             // Calculate RPM from average period
                             // RPM = 60 * 300M / period
-                            reg [31:0] avg_period;
-                            avg_period = (index_periods[0] + index_periods[1] +
-                                         index_periods[2] + index_periods[3]) >> 2;
+                            avg_period_calc = (index_periods[0] + index_periods[1] +
+                                              index_periods[2] + index_periods[3]) >> 2;
 
-                            if (avg_period > 0) begin
+                            if (avg_period_calc > 0) begin
                                 // RPM * 10 = 18,000,000,000 / avg_period
-                                rpm_x10 <= 32'd18_000_000_000 / avg_period;
+                                rpm_x10 <= 32'd18_000_000_000 / avg_period_calc;
 
                                 // Jitter = (max - min) * 256 / avg
                                 if (index_period_max > index_period_min) begin
-                                    rpm_jitter <= ((index_period_max - index_period_min) << 8) / avg_period;
+                                    rpm_jitter <= ((index_period_max - index_period_min) << 8) / avg_period_calc;
                                 end else begin
                                     rpm_jitter <= 8'd0;
                                 end
@@ -623,12 +628,10 @@ module hdd_fingerprint (
                         STAGE_JITTER_OUTER: begin
                             // Calculate jitter from variance
                             if (pulse_sample_count > 0) begin
-                                reg [31:0] mean;
-                                reg [31:0] variance;
-                                mean = pulse_width_sum / {16'd0, pulse_sample_count};
-                                variance = (pulse_width_sq_sum / {16'd0, pulse_sample_count}) -
-                                          (mean * mean);
-                                jitter_outer <= variance[15:8];  // Scaled
+                                mean_calc = pulse_width_sum / {16'd0, pulse_sample_count};
+                                variance_calc = (pulse_width_sq_sum / {16'd0, pulse_sample_count}) -
+                                               (mean_calc * mean_calc);
+                                jitter_outer <= variance_calc[15:8];  // Scaled
                             end
 
                             // Proceed to inner jitter
@@ -641,12 +644,10 @@ module hdd_fingerprint (
                         STAGE_JITTER_INNER: begin
                             // Calculate jitter
                             if (pulse_sample_count > 0) begin
-                                reg [31:0] mean;
-                                reg [31:0] variance;
-                                mean = pulse_width_sum / {16'd0, pulse_sample_count};
-                                variance = (pulse_width_sq_sum / {16'd0, pulse_sample_count}) -
-                                          (mean * mean);
-                                jitter_inner <= variance[15:8];
+                                mean_calc = pulse_width_sum / {16'd0, pulse_sample_count};
+                                variance_calc = (pulse_width_sq_sum / {16'd0, pulse_sample_count}) -
+                                               (mean_calc * mean_calc);
+                                jitter_inner <= variance_calc[15:8];
                             end
 
                             // Skip defect scan in quick mode
@@ -803,31 +804,28 @@ module hdd_fingerprint (
             fingerprint[171:164] <= seek_curve_type;
             fingerprint[163:148] <= seek_times[0][15:0];  // Short seek
             fingerprint[147:132] <= seek_times[4][15:0];  // Long seek
-            fingerprint[131:116] <= compute_defect_hash();
+            fingerprint[131:116] <= compute_defect_hash(1'b0);
             fingerprint[115:112] <= {3'd0, is_zoned};
             fingerprint[111:0]   <= 112'd0;
 
             // Compute confidence based on data quality
             // High confidence if: RPM stable, zones detected, good jitter
-            begin
-                reg [7:0] conf;
-                conf = 8'd128;  // Base confidence
+            conf_calc = 8'd128;  // Base confidence
 
-                if (rpm_jitter < 8'd10) conf = conf + 8'd32;
-                else if (rpm_jitter > 8'd50) conf = conf - 8'd32;
+            if (rpm_jitter < 8'd10) conf_calc = conf_calc + 8'd32;
+            else if (rpm_jitter > 8'd50) conf_calc = conf_calc - 8'd32;
 
-                if (valid_heads > 4'd0 && valid_heads <= 4'd8) conf = conf + 8'd16;
+            if (valid_heads > 4'd0 && valid_heads <= 4'd8) conf_calc = conf_calc + 8'd16;
 
-                if (spt_outer > 8'd0) conf = conf + 8'd16;
+            if (spt_outer > 8'd0) conf_calc = conf_calc + 8'd16;
 
-                if (mech_max_cyl > 16'd100) conf = conf + 8'd32;
+            if (mech_max_cyl > 16'd100) conf_calc = conf_calc + 8'd32;
 
-                if (seek_curve_type != 8'd0) conf = conf + 8'd16;
+            if (seek_curve_type != 8'd0) conf_calc = conf_calc + 8'd16;
 
-                fp_confidence <= conf;
-            end
+            fp_confidence <= conf_calc;
 
-            defect_hash <= compute_defect_hash();
+            defect_hash <= compute_defect_hash(1'b0);
         end
     endtask
 
@@ -835,6 +833,7 @@ module hdd_fingerprint (
     // Compute Defect Location Hash
     //-------------------------------------------------------------------------
     function [15:0] compute_defect_hash;
+        input dummy;  // Verilog requires at least one input port
         reg [31:0] hash;
         integer m;
         begin

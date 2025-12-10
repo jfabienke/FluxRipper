@@ -131,16 +131,21 @@ module isa_pnp_rom #(
             8'h2E: data <= 8'h03;  // Base high
             8'h2F: data <= 8'h02;  // Range length (2 ports)
 
-            // WD IRQ Descriptor: IRQ14
+            // WD IRQ Descriptor: IRQ14 (AT) / IRQ5 (XT)
             8'h30: data <= TAG_IRQ_FORMAT;
-            8'h31: data <= 8'h00;  // IRQ0-7 (none)
-            8'h32: data <= 8'h40;  // IRQ14 (bit 6 of high byte)
+            8'h31: data <= 8'h20;  // IRQ5 (bit 5) for XT compatibility
+            8'h32: data <= 8'h40;  // IRQ14 (bit 6 of high byte) for AT
+
+            // WD DMA Descriptor: DRQ3 (XT mode)
+            8'h33: data <= TAG_DMA_FORMAT;
+            8'h34: data <= 8'h08;  // DMA3 (bit 3)
+            8'h35: data <= 8'h00;  // 8-bit, compatibility mode
 
             //=================================================================
             // End Tag
             //=================================================================
-            8'h33: data <= TAG_END;
-            8'h34: data <= 8'h00;  // Checksum (placeholder)
+            8'h36: data <= TAG_END;
+            8'h37: data <= 8'h00;  // Checksum (placeholder)
 
             //=================================================================
             // Padding / Default
@@ -317,16 +322,21 @@ module isa_pnp_rom_extended #(
             9'h06E: data <= 8'h03;
             9'h06F: data <= 8'h02;
 
-            // WD IRQ14
+            // WD IRQ14 (AT) / IRQ5 (XT)
             9'h070: data <= 8'h22;
-            9'h071: data <= 8'h00;
-            9'h072: data <= 8'h40;
+            9'h071: data <= 8'h20;  // IRQ5 (bit 5) for XT
+            9'h072: data <= 8'h40;  // IRQ14 (bit 6 high byte) for AT
+
+            // WD DMA3 (XT mode)
+            9'h073: data <= 8'h2A;  // TAG_DMA_FORMAT
+            9'h074: data <= 8'h08;  // DMA3 (bit 3)
+            9'h075: data <= 8'h00;  // 8-bit, compatibility mode
 
             //=================================================================
             // End Tag
             //=================================================================
-            9'h073: data <= 8'h79;  // TAG_END
-            9'h074: data <= 8'h00;
+            9'h076: data <= 8'h79;  // TAG_END
+            9'h077: data <= 8'h00;
 
             default: data <= 8'hFF;
         endcase

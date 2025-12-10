@@ -102,6 +102,12 @@ module rll_2_7_encoder (
     reg [15:0] output_shift;
     reg [4:0] output_count;
 
+    // Intermediate values (declared at module level for Verilog compatibility)
+    reg [1:0] next_2bits;
+    reg [3:0] encoded_2;
+    reg [2:0] next_3bits;
+    reg [5:0] encoded_3;
+
     // Ready signal
     assign data_ready = (state == STATE_IDLE) || (state == STATE_WAIT && bits_remaining < 4'd3);
 
@@ -133,7 +139,6 @@ module rll_2_7_encoder (
                     // Encode 2 bits at a time
                     if (bits_remaining >= 4'd2) begin
                         // Get next 2 bits
-                        reg [1:0] next_2bits;
                         next_2bits = data_buffer[7:6];
 
                         // Check if we need 3-bit encoding for special cases
@@ -143,17 +148,16 @@ module rll_2_7_encoder (
                             state <= STATE_ENCODE_3;
                         end else begin
                             // Standard 2-bit encoding
-                            reg [3:0] encoded;
-                            encoded = encode_2bit(next_2bits, prev_bit_was_one);
+                            encoded_2 = encode_2bit(next_2bits, prev_bit_was_one);
 
-                            output_shift <= {output_shift[11:0], encoded};
+                            output_shift <= {output_shift[11:0], encoded_2};
                             output_count <= output_count + 5'd4;
 
                             // Update state tracking
-                            prev_bit_was_one <= encoded[0];
-                            zeros_since_one <= encoded[0] ? 3'd0 :
-                                             (encoded[1] ? 3'd1 :
-                                             (encoded[2] ? 3'd2 : 3'd3));
+                            prev_bit_was_one <= encoded_2[0];
+                            zeros_since_one <= encoded_2[0] ? 3'd0 :
+                                             (encoded_2[1] ? 3'd1 :
+                                             (encoded_2[2] ? 3'd2 : 3'd3));
 
                             // Shift data buffer
                             data_buffer <= {data_buffer[5:0], 2'b00};
@@ -177,17 +181,14 @@ module rll_2_7_encoder (
                 STATE_ENCODE_3: begin
                     // 3-bit encoding for special patterns
                     if (bits_remaining >= 4'd3) begin
-                        reg [2:0] next_3bits;
-                        reg [5:0] encoded;
-
                         next_3bits = data_buffer[7:5];
-                        encoded = encode_3bit(next_3bits, prev_bit_was_one);
+                        encoded_3 = encode_3bit(next_3bits, prev_bit_was_one);
 
-                        output_shift <= {output_shift[9:0], encoded};
+                        output_shift <= {output_shift[9:0], encoded_3};
                         output_count <= output_count + 5'd6;
 
                         // Update state tracking
-                        prev_bit_was_one <= encoded[0];
+                        prev_bit_was_one <= encoded_3[0];
 
                         // Shift data buffer
                         data_buffer <= {data_buffer[4:0], 3'b000};

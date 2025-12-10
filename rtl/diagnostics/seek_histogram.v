@@ -127,6 +127,7 @@ module seek_histogram (
     // Seek Tracking
     //-------------------------------------------------------------------------
     integer i;
+    reg [15:0] seek_us;  // Seek time in microseconds
 
     always @(posedge clk) begin
         if (reset || stats_clear) begin
@@ -195,7 +196,7 @@ module seek_histogram (
                 total_seek_time <= total_seek_time + seek_timer;
 
                 // Convert to microseconds
-                wire [15:0] seek_us = clocks_to_us(seek_timer);
+                seek_us = clocks_to_us(seek_timer);
 
                 // Update min/max
                 if (seek_us < min_seek_time)

@@ -77,17 +77,17 @@ module usb_descriptor_rom #(
     input  wire        rst_n,
 
     // Personality Selection
-    input  wire [2:0]  personality_sel,   // 0-4
+    input  wire [2:0]  personality,        // 0-4 (alias: personality_sel)
 
     // Descriptor Read Interface
     input  wire [7:0]  desc_type,         // Descriptor type (1=Device, 2=Config, 3=String)
     input  wire [7:0]  desc_index,        // Descriptor index (for strings)
-    input  wire [15:0] desc_offset,       // Byte offset into descriptor
-    input  wire        desc_read,         // Read strobe
+    input  wire [15:0] desc_length,       // Requested length
+    input  wire        desc_request,      // Request strobe (alias: desc_read)
 
     output reg  [7:0]  desc_data,         // Descriptor byte
     output reg         desc_valid,        // Data valid
-    output reg  [15:0] desc_length,       // Total descriptor length
+    output reg         desc_last,         // Last byte of descriptor
 
     // Device Information (active personality)
     output reg  [15:0] vid,               // Vendor ID
@@ -388,8 +388,40 @@ module usb_descriptor_rom #(
 
         //=====================================================================
         // HxC Configuration (same as Greaseweazle)
+        // Note: Copying config_desc[0] element by element for Verilog compatibility
         //=====================================================================
-        config_desc[1] = config_desc[0];
+        config_desc[1][0] = config_desc[0][0];
+        config_desc[1][1] = config_desc[0][1];
+        config_desc[1][2] = config_desc[0][2];
+        config_desc[1][3] = config_desc[0][3];
+        config_desc[1][4] = config_desc[0][4];
+        config_desc[1][5] = config_desc[0][5];
+        config_desc[1][6] = config_desc[0][6];
+        config_desc[1][7] = config_desc[0][7];
+        config_desc[1][8] = config_desc[0][8];
+        config_desc[1][9] = config_desc[0][9];
+        config_desc[1][10] = config_desc[0][10];
+        config_desc[1][11] = config_desc[0][11];
+        config_desc[1][12] = config_desc[0][12];
+        config_desc[1][13] = config_desc[0][13];
+        config_desc[1][14] = config_desc[0][14];
+        config_desc[1][15] = config_desc[0][15];
+        config_desc[1][16] = config_desc[0][16];
+        config_desc[1][17] = config_desc[0][17];
+        config_desc[1][18] = config_desc[0][18];
+        config_desc[1][19] = config_desc[0][19];
+        config_desc[1][20] = config_desc[0][20];
+        config_desc[1][21] = config_desc[0][21];
+        config_desc[1][22] = config_desc[0][22];
+        config_desc[1][23] = config_desc[0][23];
+        config_desc[1][24] = config_desc[0][24];
+        config_desc[1][25] = config_desc[0][25];
+        config_desc[1][26] = config_desc[0][26];
+        config_desc[1][27] = config_desc[0][27];
+        config_desc[1][28] = config_desc[0][28];
+        config_desc[1][29] = config_desc[0][29];
+        config_desc[1][30] = config_desc[0][30];
+        config_desc[1][31] = config_desc[0][31];
 
         //=====================================================================
         // KryoFlux Configuration with CDC ACM
@@ -781,24 +813,31 @@ module usb_descriptor_rom #(
     // Descriptor Read Logic
     //=========================================================================
 
-    reg [2:0] pers_idx;
+    reg [2:0]  pers_idx;
+    reg [15:0] byte_offset;       // Current byte offset
+    reg [15:0] total_len;         // Total descriptor length
+    reg        active;            // Descriptor transfer active
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             desc_data   <= 8'd0;
             desc_valid  <= 1'b0;
-            desc_length <= 16'd0;
+            desc_last   <= 1'b0;
             vid         <= 16'd0;
             pid         <= 16'd0;
             device_class    <= 8'd0;
             device_subclass <= 8'd0;
             device_protocol <= 8'd0;
             pers_idx    <= 3'd0;
+            byte_offset <= 16'd0;
+            total_len   <= 16'd0;
+            active      <= 1'b0;
         end else begin
             desc_valid <= 1'b0;
+            desc_last  <= 1'b0;
 
             // Clamp personality index
-            pers_idx <= (personality_sel < NUM_PERSONALITIES) ? personality_sel : 3'd0;
+            pers_idx <= (personality < NUM_PERSONALITIES) ? personality : 3'd0;
 
             // Update active VID/PID
             vid <= {device_desc[pers_idx][9], device_desc[pers_idx][8]};
@@ -807,69 +846,68 @@ module usb_descriptor_rom #(
             device_subclass <= device_desc[pers_idx][5];
             device_protocol <= device_desc[pers_idx][6];
 
-            if (desc_read) begin
+            if (desc_request) begin
+                // Start new descriptor transfer
+                byte_offset <= 16'd0;
+                active <= 1'b1;
+
+                case (desc_type)
+                    DESC_DEVICE: begin
+                        total_len <= 16'd18;
+                    end
+                    DESC_CONFIGURATION: begin
+                        total_len <= {config_desc[pers_idx][3], config_desc[pers_idx][2]};
+                    end
+                    DESC_STRING: begin
+                        case (desc_index)
+                            8'd0: total_len <= 16'd4;
+                            8'd1: total_len <= {8'd0, string1[0]};
+                            8'd2: total_len <= {8'd0, string2[pers_idx][0]};
+                            8'd3: total_len <= {8'd0, string3[0]};
+                            default: total_len <= 16'd0;
+                        endcase
+                    end
+                    default: begin
+                        total_len <= 16'd0;
+                        active <= 1'b0;
+                    end
+                endcase
+            end
+            else if (active) begin
                 desc_valid <= 1'b1;
 
                 case (desc_type)
                     DESC_DEVICE: begin
-                        desc_length <= 16'd18;
-                        if (desc_offset < 18)
-                            desc_data <= device_desc[pers_idx][desc_offset[4:0]];
+                        if (byte_offset < 18)
+                            desc_data <= device_desc[pers_idx][byte_offset[4:0]];
                         else
                             desc_data <= 8'd0;
                     end
-
                     DESC_CONFIGURATION: begin
-                        // Return total config length (wTotalLength from bytes 2-3)
-                        desc_length <= {config_desc[pers_idx][3], config_desc[pers_idx][2]};
-                        if (desc_offset < 128)
-                            desc_data <= config_desc[pers_idx][desc_offset[6:0]];
+                        if (byte_offset < 128)
+                            desc_data <= config_desc[pers_idx][byte_offset[6:0]];
                         else
                             desc_data <= 8'd0;
                     end
-
                     DESC_STRING: begin
                         case (desc_index)
-                            8'd0: begin  // Language ID
-                                desc_length <= 16'd4;
-                                if (desc_offset < 4)
-                                    desc_data <= string0[desc_offset[1:0]];
-                                else
-                                    desc_data <= 8'd0;
-                            end
-                            8'd1: begin  // Manufacturer
-                                desc_length <= {8'd0, string1[0]};
-                                if (desc_offset < 32)
-                                    desc_data <= string1[desc_offset[4:0]];
-                                else
-                                    desc_data <= 8'd0;
-                            end
-                            8'd2: begin  // Product (personality-specific)
-                                desc_length <= {8'd0, string2[pers_idx][0]};
-                                if (desc_offset < 64)
-                                    desc_data <= string2[pers_idx][desc_offset[5:0]];
-                                else
-                                    desc_data <= 8'd0;
-                            end
-                            8'd3: begin  // Serial
-                                desc_length <= {8'd0, string3[0]};
-                                if (desc_offset < 32)
-                                    desc_data <= string3[desc_offset[4:0]];
-                                else
-                                    desc_data <= 8'd0;
-                            end
-                            default: begin
-                                desc_length <= 16'd0;
-                                desc_data   <= 8'd0;
-                            end
+                            8'd0: desc_data <= (byte_offset < 4) ? string0[byte_offset[1:0]] : 8'd0;
+                            8'd1: desc_data <= (byte_offset < 32) ? string1[byte_offset[4:0]] : 8'd0;
+                            8'd2: desc_data <= (byte_offset < 64) ? string2[pers_idx][byte_offset[5:0]] : 8'd0;
+                            8'd3: desc_data <= (byte_offset < 32) ? string3[byte_offset[4:0]] : 8'd0;
+                            default: desc_data <= 8'd0;
                         endcase
                     end
-
-                    default: begin
-                        desc_length <= 16'd0;
-                        desc_data   <= 8'd0;
-                    end
+                    default: desc_data <= 8'd0;
                 endcase
+
+                byte_offset <= byte_offset + 1'b1;
+
+                // Check if this is the last byte
+                if (byte_offset + 1'b1 >= total_len || byte_offset + 1'b1 >= desc_length) begin
+                    desc_last <= 1'b1;
+                    active <= 1'b0;
+                end
             end
         end
     end

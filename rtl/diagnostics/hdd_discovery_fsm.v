@@ -169,7 +169,7 @@ module hdd_discovery_fsm (
     //-------------------------------------------------------------------------
     reg [3:0] current_stage;
     reg [23:0] timeout_counter;
-    localparam [23:0] STAGE_TIMEOUT = 24.d30_000_000;  // 100ms @ 300 MHz
+    localparam [23:0] STAGE_TIMEOUT = 24'd30_000_000;  // 100ms @ 300 MHz
 
     //-------------------------------------------------------------------------
     // Decode Test Results Storage

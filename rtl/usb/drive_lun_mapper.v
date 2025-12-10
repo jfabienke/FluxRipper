@@ -73,17 +73,19 @@ module drive_lun_mapper #(
     input  wire [MAX_FDDS-1:0] fdd_present,     // Disk inserted
     input  wire [MAX_FDDS-1:0] fdd_write_prot,  // Write protected
 
-    // FDD geometry (from drive profile or default)
-    input  wire [15:0] fdd_capacity [0:MAX_FDDS-1],  // Sectors per disk
-    input  wire [15:0] fdd_block_size [0:MAX_FDDS-1],// Bytes per sector
+    // FDD geometry (selection-based for Verilog compatibility)
+    input  wire [1:0]  fdd_query_sel,           // Which FDD to query
+    input  wire [15:0] fdd_capacity_sel,        // Capacity of selected FDD
+    input  wire [15:0] fdd_block_size_sel,      // Block size of selected FDD
 
     // HDD status (from hdd_hal)
     input  wire [MAX_HDDS-1:0] hdd_present,     // Drive ready
     input  wire [MAX_HDDS-1:0] hdd_write_prot,  // Write protected (rare)
 
-    // HDD geometry (from discovery)
-    input  wire [31:0] hdd_capacity [0:MAX_HDDS-1],  // Sectors per disk
-    input  wire [15:0] hdd_block_size [0:MAX_HDDS-1],// Bytes per sector
+    // HDD geometry (selection-based for Verilog compatibility)
+    input  wire [1:0]  hdd_query_sel,           // Which HDD to query
+    input  wire [31:0] hdd_capacity_sel,        // Capacity of selected HDD
+    input  wire [15:0] hdd_block_size_sel,      // Block size of selected HDD
 
     //=========================================================================
     // LUN Configuration Outputs (to SCSI engine)
@@ -92,8 +94,9 @@ module drive_lun_mapper #(
     output wire [MAX_LUNS-1:0] lun_present,     // LUN has media
     output wire [MAX_LUNS-1:0] lun_removable,   // LUN is removable
     output wire [MAX_LUNS-1:0] lun_readonly,    // LUN is write-protected
-    output reg  [31:0] lun_capacity [0:MAX_LUNS-1],   // Capacity per LUN
-    output reg  [15:0] lun_block_size [0:MAX_LUNS-1], // Block size per LUN
+    input  wire [2:0]  lun_query_sel,           // Which LUN to query
+    output reg  [31:0] lun_capacity_sel,        // Capacity of selected LUN
+    output reg  [15:0] lun_block_size_sel,      // Block size of selected LUN
 
     //=========================================================================
     // Status
@@ -140,31 +143,35 @@ module drive_lun_mapper #(
     assign lun_readonly[2] = hdd_write_prot[0];
     assign lun_readonly[3] = (MAX_HDDS > 1) ? hdd_write_prot[1] : 1'b0;
 
-    // Capacity and block size (updated in always block)
+    // Capacity and block size (selection-based mux)
+    // LUN mapping: 0,1 = FDD0,1; 2,3 = HDD0,1
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            lun_capacity[0] <= 32'd2880;    // Default 1.44MB
-            lun_capacity[1] <= 32'd2880;
-            lun_capacity[2] <= 32'd0;
-            lun_capacity[3] <= 32'd0;
-            lun_block_size[0] <= 16'd512;
-            lun_block_size[1] <= 16'd512;
-            lun_block_size[2] <= 16'd512;
-            lun_block_size[3] <= 16'd512;
+            lun_capacity_sel <= 32'd2880;   // Default 1.44MB
+            lun_block_size_sel <= 16'd512;
         end else begin
-            // FDD capacity (convert 16-bit to 32-bit)
-            lun_capacity[0] <= {16'h0, fdd_capacity[0]};
-            lun_capacity[1] <= (MAX_FDDS > 1) ? {16'h0, fdd_capacity[1]} : 32'd0;
-
-            // HDD capacity
-            lun_capacity[2] <= hdd_capacity[0];
-            lun_capacity[3] <= (MAX_HDDS > 1) ? hdd_capacity[1] : 32'd0;
-
-            // Block sizes
-            lun_block_size[0] <= fdd_block_size[0];
-            lun_block_size[1] <= (MAX_FDDS > 1) ? fdd_block_size[1] : 16'd512;
-            lun_block_size[2] <= hdd_block_size[0];
-            lun_block_size[3] <= (MAX_HDDS > 1) ? hdd_block_size[1] : 16'd512;
+            case (lun_query_sel)
+                3'd0: begin // FDD 0
+                    lun_capacity_sel <= {16'h0, fdd_capacity_sel};
+                    lun_block_size_sel <= fdd_block_size_sel;
+                end
+                3'd1: begin // FDD 1
+                    lun_capacity_sel <= {16'h0, fdd_capacity_sel};
+                    lun_block_size_sel <= fdd_block_size_sel;
+                end
+                3'd2: begin // HDD 0
+                    lun_capacity_sel <= hdd_capacity_sel;
+                    lun_block_size_sel <= hdd_block_size_sel;
+                end
+                3'd3: begin // HDD 1
+                    lun_capacity_sel <= hdd_capacity_sel;
+                    lun_block_size_sel <= hdd_block_size_sel;
+                end
+                default: begin
+                    lun_capacity_sel <= 32'd0;
+                    lun_block_size_sel <= 16'd512;
+                end
+            endcase
         end
     end
 

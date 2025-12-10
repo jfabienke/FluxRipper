@@ -7,7 +7,11 @@
 // Extended for Macintosh variable-speed GCR support:
 //   CCR bit [4] = mac_zone_enable (enables automatic zone-based data rate)
 //
-// Updated: 2025-12-03 23:05
+// Extended for QIC-117 tape drive support:
+//   TDR bit [7]   = tape_mode_en (enables tape mode, reinterprets FDC signals)
+//   TDR bits[2:0] = tape_select (tape drive select 1-3, 0=none)
+//
+// Updated: 2025-12-10
 //-----------------------------------------------------------------------------
 
 module fdc_registers (
@@ -31,6 +35,10 @@ module fdc_registers (
     output reg         reset_out,       // Software reset output
     output reg  [3:0]  precomp_delay,   // Write precompensation delay
     output reg         mac_zone_enable, // Macintosh variable-speed zone mode
+
+    // QIC-117 Tape Mode outputs
+    output wire        tape_mode_en,    // Tape mode enable (TDR bit 7)
+    output wire [2:0]  tape_select,     // Tape drive select (TDR bits 2:0)
 
     // Status inputs
     input  wire [3:0]  drive_ready,     // Drive ready status
@@ -81,7 +89,14 @@ module fdc_registers (
     // Bits: [7:5] = reserved, [4] = mac_zone_enable, [3:2] = reserved, [1:0] = data rate
 
     // TDR - Tape Drive Register
+    // Bit [7]   = tape_mode_en (1=tape mode, 0=floppy mode)
+    // Bits[6:3] = reserved
+    // Bits[2:0] = tape_select (tape drive 1-3, 0=none)
     reg [7:0] tdr_reg;
+
+    // TDR output assignments for QIC-117 controller
+    assign tape_mode_en = tdr_reg[7];
+    assign tape_select  = tdr_reg[2:0];
 
     //-------------------------------------------------------------------------
     // Read/Write control

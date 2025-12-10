@@ -68,6 +68,10 @@ module rll_2_7_decoder (
     reg [2:0] zeros_count;        // Consecutive zeros seen
     reg       prev_was_one;
 
+    // Decode results (declared at module level for Verilog compatibility)
+    reg [2:0] result_4;
+    reg [3:0] result_6;
+
     //-------------------------------------------------------------------------
     // 4-bit Pattern Lookup
     //-------------------------------------------------------------------------
@@ -179,7 +183,6 @@ module rll_2_7_decoder (
                     // Try to decode accumulated bits
                     if (code_count >= 4'd4) begin
                         // First try 4-bit decode
-                        reg [2:0] result_4;
                         result_4 = decode_4bit(code_shift[3:0]);
 
                         if (result_4[2]) begin
@@ -201,7 +204,6 @@ module rll_2_7_decoder (
 
                 //-------------------------------------------------------------
                 STATE_CHECK_6: begin
-                    reg [3:0] result_6;
                     result_6 = decode_6bit(code_shift[5:0]);
 
                     if (result_6[3]) begin

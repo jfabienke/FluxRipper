@@ -46,7 +46,7 @@ module hdd_phy_probe (
     //-------------------------------------------------------------------------
     // Sample window: 1 revolution (~16.67ms @ 3600 RPM = 5M clocks @ 300 MHz)
     // Use shorter window for quicker probe
-    localparam [23:0] SAMPLE_WINDOW       = 24.d1_500_000;  // 5ms @ 300 MHz
+    localparam [23:0] SAMPLE_WINDOW       = 24'd1_500_000;  // 5ms @ 300 MHz
     localparam [15:0] MIN_EDGES_THRESHOLD = 16'd1000; // Minimum edges to confirm signal
     localparam [15:0] MAX_NOISE_EDGES = 16'd50000;    // Above this = noisy
 

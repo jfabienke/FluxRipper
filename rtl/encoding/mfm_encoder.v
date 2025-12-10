@@ -193,3 +193,120 @@ module mfm_encoder_sync (
     end
 
 endmodule
+
+//-----------------------------------------------------------------------------
+// MFM Serial Encoder for Flux Stream Output
+// Converts parallel bytes to serial MFM-encoded flux transitions
+//
+// Interface matches other serial encoders (fm_encoder_serial, etc.)
+// for use with encoding_mux.v
+//
+// MFM encoding rules:
+// - Data bit 1 -> 01 (flux transition on data position)
+// - Data bit 0 after 1 -> 00 (no transitions)
+// - Data bit 0 after 0 -> 10 (flux transition on clock position)
+//
+// Created: 2025-12-07
+//-----------------------------------------------------------------------------
+module mfm_encoder_serial (
+    input  wire        clk,
+    input  wire        reset,
+    input  wire        enable,
+    input  wire        bit_clk,        // Bit clock (2x data rate for MFM)
+    input  wire [7:0]  data_in,        // Byte to encode
+    input  wire        data_valid,     // New byte available
+    output reg         flux_out,       // Serial MFM encoded output
+    output reg         flux_valid,     // Output bit valid
+    output reg         byte_complete,  // Byte fully transmitted
+    output reg         ready           // Ready for new byte
+);
+
+    //-------------------------------------------------------------------------
+    // Internal State
+    //-------------------------------------------------------------------------
+    reg [7:0]  shift_reg;
+    reg [3:0]  bit_counter;   // Counts 0-15 (8 data bits * 2 = 16 MFM bits)
+    reg        clock_phase;   // 0=clock bit position, 1=data bit position
+    reg        active;
+    reg        prev_data_bit; // Previous data bit for MFM encoding rule
+
+    //-------------------------------------------------------------------------
+    // MFM Encoding Logic
+    //-------------------------------------------------------------------------
+    // For current data bit and previous data bit, determine output:
+    // - Clock position: 1 if both prev and current data are 0, else 0
+    // - Data position: same as data bit
+
+    wire current_data_bit;
+    wire mfm_clock_bit;
+    wire mfm_data_bit;
+
+    assign current_data_bit = shift_reg[7];
+    assign mfm_clock_bit = (!prev_data_bit && !current_data_bit) ? 1'b1 : 1'b0;
+    assign mfm_data_bit = current_data_bit;
+
+    //-------------------------------------------------------------------------
+    // State Machine
+    //-------------------------------------------------------------------------
+    always @(posedge clk) begin
+        if (reset) begin
+            shift_reg     <= 8'h00;
+            bit_counter   <= 4'd0;
+            clock_phase   <= 1'b0;
+            active        <= 1'b0;
+            prev_data_bit <= 1'b0;
+            flux_out      <= 1'b0;
+            flux_valid    <= 1'b0;
+            byte_complete <= 1'b0;
+            ready         <= 1'b1;
+        end
+        else if (enable) begin
+            flux_valid    <= 1'b0;
+            byte_complete <= 1'b0;
+
+            if (data_valid && ready) begin
+                // Load new byte
+                shift_reg   <= data_in;
+                bit_counter <= 4'd0;
+                clock_phase <= 1'b0;
+                active      <= 1'b1;
+                ready       <= 1'b0;
+            end
+            else if (active && bit_clk) begin
+                if (!clock_phase) begin
+                    // Output clock bit position
+                    // MFM: clock pulse only if both prev and current data bits are 0
+                    flux_out    <= mfm_clock_bit;
+                    flux_valid  <= 1'b1;
+                    clock_phase <= 1'b1;
+                end
+                else begin
+                    // Output data bit position (MSB first)
+                    flux_out    <= mfm_data_bit;
+                    flux_valid  <= 1'b1;
+                    clock_phase <= 1'b0;
+
+                    // Save current data bit as previous for next iteration
+                    prev_data_bit <= current_data_bit;
+
+                    // Shift to next data bit
+                    shift_reg <= {shift_reg[6:0], 1'b0};
+                    bit_counter <= bit_counter + 1'b1;
+
+                    // Check if byte complete (8 data bits = 16 MFM bits)
+                    if (bit_counter == 4'd7) begin
+                        byte_complete <= 1'b1;
+                        active        <= 1'b0;
+                        ready         <= 1'b1;
+                    end
+                end
+            end
+        end
+        else begin
+            // Disabled - maintain ready state
+            ready <= 1'b1;
+            active <= 1'b0;
+        end
+    end
+
+endmodule

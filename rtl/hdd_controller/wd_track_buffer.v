@@ -75,7 +75,12 @@ module wd_track_buffer #(
     input  wire [13:0] direct_addr,       // Direct address (0-8831)
     input  wire [7:0]  direct_wdata,      // Direct write data
     input  wire        direct_write,      // Direct write enable
-    output wire [7:0]  direct_rdata       // Direct read data
+    output wire [7:0]  direct_rdata,      // Direct read data
+
+    //-------------------------------------------------------------------------
+    // Benchmark Mode Control
+    //-------------------------------------------------------------------------
+    input  wire        bypass_mode        // 1 = bypass cache (always read from disk)
 );
 
     //=========================================================================
@@ -220,8 +225,18 @@ module wd_track_buffer #(
 
                 //-------------------------------------------------------------
                 ST_CHECK_CACHE: begin
+                    // In bypass mode, always read from disk (for benchmark)
+                    if (bypass_mode && !op_is_write) begin
+                        // Bypass cache - force disk read for benchmark testing
+                        cached_cylinder <= target_cylinder;
+                        cached_head     <= target_head;
+                        valid_bitmap    <= 17'h00000;  // Invalidate all
+                        dirty_bitmap    <= 17'h00000;
+                        buffer_state    <= BUF_CLEAN;
+                        state           <= ST_FILL_READ;
+                    end
                     // Check if requested track is already in buffer
-                    if (cached_cylinder == target_cylinder &&
+                    else if (cached_cylinder == target_cylinder &&
                         cached_head == target_head &&
                         buffer_state != BUF_EMPTY) begin
                         // Cache hit!

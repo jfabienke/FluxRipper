@@ -114,6 +114,9 @@ module correlation_calc (
     reg [7:0]  a_pulse_min;
     reg [7:0]  a_pulse_max;
 
+    // Correlation calculation temporary
+    reg [23:0] scaled_match;
+
     //-------------------------------------------------------------------------
     // Main Correlation Logic
     //-------------------------------------------------------------------------
@@ -233,9 +236,8 @@ module correlation_calc (
                 // Update every 64 edges
                 if (edges_on_a > 16'd0) begin
                     // Approximation: (matched * 256) / edges ≈ matched << 8 / edges
-                    reg [23:0] scaled_match;
                     scaled_match = {matched_edges, 8'd0};
-                    correlation <= scaled_match / {8'd0, edges_on_a};
+                    correlation <= scaled_match[23:16];
 
                     // Determine if differential
                     is_differential <= (correlation >= DIFF_THRESHOLD);

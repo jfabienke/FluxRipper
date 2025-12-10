@@ -287,7 +287,7 @@ module usb_passthrough_analyzer #(
 );
 
     // This would require:
-    // 1. Second USB3300/USB3320 PHY
+    // 1. Second USB3320 PHY
     // 2. USB pass-through logic (transparent relay)
     // 3. Tapping the UTMI signals from both directions
     //

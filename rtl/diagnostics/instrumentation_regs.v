@@ -490,6 +490,8 @@ module instrumentation_regs #(
     //=========================================================================
 
     integer i;
+    reg [31:0] hist_timing_ns;
+    reg [7:0]  hist_bin_idx;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n || histogram_reset) begin
@@ -500,15 +502,12 @@ module instrumentation_regs #(
             hist_bin_width <= 32'd125;       // 125ns bins
         end else if (flux_valid) begin
             // Convert timestamp to ns (assuming 5ns resolution)
-            reg [31:0] timing_ns;
-            reg [7:0] bin_idx;
+            hist_timing_ns = {5'h0, flux_timestamp} * 5;
 
-            timing_ns = {5'h0, flux_timestamp} * 5;
-
-            if (timing_ns >= hist_bin_min) begin
-                bin_idx = (timing_ns - hist_bin_min) / hist_bin_width;
-                if (bin_idx < HISTOGRAM_BINS) begin
-                    flux_histogram[bin_idx] <= flux_histogram[bin_idx] + 1'b1;
+            if (hist_timing_ns >= hist_bin_min) begin
+                hist_bin_idx = (hist_timing_ns - hist_bin_min) / hist_bin_width;
+                if (hist_bin_idx < HISTOGRAM_BINS) begin
+                    flux_histogram[hist_bin_idx] <= flux_histogram[hist_bin_idx] + 1'b1;
                 end
             end
         end

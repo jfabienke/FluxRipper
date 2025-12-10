@@ -219,8 +219,8 @@ module st506_step_generator (
     reg [15:0] counter;
 
     // Setup and hold times (in clock cycles @ 300 MHz)
-    localparam [15:0] DIR_SETUP_TIME      = 16.d300;   // 1 µs
-    localparam [15:0] STEP_HOLD_TIME      = 16.d300;   // 1 µs
+    localparam [15:0] DIR_SETUP_TIME      = 16'd300;   // 1 µs
+    localparam [15:0] STEP_HOLD_TIME      = 16'd300;   // 1 µs
 
     always @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin

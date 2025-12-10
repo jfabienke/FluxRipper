@@ -380,8 +380,8 @@ module epr4_decoder #(
     input  wire signed [SAMPLE_WIDTH-1:0] sample_in,
     input  wire                     sample_valid,
 
-    output reg                      bit_out,
-    output reg                      bit_valid,
+    output wire                     bit_out,
+    output wire                     bit_valid,
 
     // 5 reference levels for EPR4: {-4, -2, 0, +2, +4}
     input  wire signed [SAMPLE_WIDTH-1:0] level_n4,
@@ -390,8 +390,8 @@ module epr4_decoder #(
     input  wire signed [SAMPLE_WIDTH-1:0] level_p2,
     input  wire signed [SAMPLE_WIDTH-1:0] level_p4,
 
-    output reg  [METRIC_WIDTH-1:0]  min_path_metric,
-    output reg                      sync_locked
+    output wire [METRIC_WIDTH-1:0]  min_path_metric,
+    output wire                     sync_locked
 );
 
     // EPR4 has 8 states (3-bit history)

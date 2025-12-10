@@ -103,7 +103,7 @@ module hdd_geometry_scanner (
     //-------------------------------------------------------------------------
     // Scan Parameters
     //-------------------------------------------------------------------------
-    localparam [23:0] ROTATION_TIMEOUT  = 24.d6_000_000;  // 20ms @ 300 MHz (> 1 rotation)
+    localparam [23:0] ROTATION_TIMEOUT  = 24'd6_000_000;  // 20ms @ 300 MHz (> 1 rotation)
     localparam [15:0] MAX_CYLINDERS = 16'd4096;          // Max cylinders to try
     localparam [3:0]  MAX_HEADS = 4'd15;                 // Max heads to try
 

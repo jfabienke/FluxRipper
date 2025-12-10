@@ -50,7 +50,7 @@ QIC-117 drives connect to a standard floppy controller but reinterpret the signa
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      FluxRipper QIC-117 Tape Subsystem                       │
+│                      FluxRipper QIC-117 Tape Subsystem                      │
 │                                                                             │
 │  ┌──────────────────┐                      ┌──────────────────────────────┐ │
 │  │   FDC Registers  │                      │     QIC-117 Controller       │ │
@@ -67,10 +67,10 @@ QIC-117 drives connect to a standard floppy controller but reinterpret the signa
 │  │                  │                      │              │               │ │
 │  │  STEP pulses    ─┼──────────────────────┼──────────────┘               │ │
 │  │                  │                      │                              │ │
-│  │  TRK0 input    ◄─┼──────────────────────┼── Status Encoder            │ │
-│  │                  │                      │   (time-encoded bits)       │ │
-│  │  MFM data      ◄─┼──────────────────────┼── Data Streamer             │ │
-│  │                  │                      │   (block/segment detect)    │ │
+│  │  TRK0 input    ◄─┼──────────────────────┼── Status Encoder             │ │
+│  │                  │                      │   (time-encoded bits)        │ │
+│  │  MFM data      ◄─┼──────────────────────┼── Data Streamer              │ │
+│  │                  │                      │   (block/segment detect)     │ │
 │  └──────────────────┘                      │                              │ │
 │                                            │  ┌────────────────────────┐  │ │
 │  ┌──────────────────┐                      │  │   Drive Detection      │  │ │

@@ -38,7 +38,7 @@ module msc_protocol #(
     input  wire        rst_n,
 
     //=========================================================================
-    // USB Interface (from usb_composite_mux)
+    // USB Interface
     //=========================================================================
 
     // Commands from host (EP1 OUT via composite mux)

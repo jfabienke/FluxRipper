@@ -237,14 +237,8 @@ module tb_msc_protocol;
         //---------------------------------------------------------------------
         $display("\n--- Test 1: TEST UNIT READY ---");
 
-        send_cbw(
-            .tag(32'h00000001),
-            .transfer_length(0),
-            .flags(8'h00),           // No data transfer
-            .lun(0),
-            .cdb_length(6),
-            .cdb({120'h0, 8'h00})    // TEST UNIT READY opcode
-        );
+        // send_cbw(tag, transfer_length, flags, lun, cdb_length, cdb)
+        send_cbw(32'h00000001, 32'd0, 8'h00, 8'd0, 8'd6, {120'h0, 8'h00});
 
         complete_scsi_command(8'h00);  // Good status
         wait_for_csw();
@@ -256,14 +250,8 @@ module tb_msc_protocol;
         //---------------------------------------------------------------------
         $display("\n--- Test 2: INQUIRY ---");
 
-        send_cbw(
-            .tag(32'h00000002),
-            .transfer_length(36),
-            .flags(8'h80),           // Data-In (device to host)
-            .lun(0),
-            .cdb_length(6),
-            .cdb({88'h0, 8'd36, 16'h0, 8'h12})  // INQUIRY, allocation length = 36
-        );
+        // INQUIRY: tag=2, len=36, flags=0x80 (Data-In), lun=0, cdb_len=6
+        send_cbw(32'h00000002, 32'd36, 8'h80, 8'd0, 8'd6, {88'h0, 8'd36, 16'h0, 8'h12});
 
         complete_scsi_command(8'h00);
 
@@ -285,14 +273,8 @@ module tb_msc_protocol;
         //---------------------------------------------------------------------
         $display("\n--- Test 3: READ_10 ---");
 
-        send_cbw(
-            .tag(32'h00000003),
-            .transfer_length(512),   // 1 sector
-            .flags(8'h80),           // Data-In
-            .lun(0),
-            .cdb_length(10),
-            .cdb({48'h0, 16'h0001, 32'h00000000, 8'h00, 8'h28})  // READ_10, LBA=0, Count=1
-        );
+        // READ_10: tag=3, len=512, flags=0x80 (Data-In), lun=0, cdb_len=10
+        send_cbw(32'h00000003, 32'd512, 8'h80, 8'd0, 8'd10, {48'h0, 16'h0001, 32'h00000000, 8'h00, 8'h28});
 
         complete_scsi_command(8'h00);
 
@@ -336,14 +318,8 @@ module tb_msc_protocol;
         //---------------------------------------------------------------------
         $display("\n--- Test 5: WRITE_10 ---");
 
-        send_cbw(
-            .tag(32'h00000005),
-            .transfer_length(512),   // 1 sector
-            .flags(8'h00),           // Data-Out (host to device)
-            .lun(0),
-            .cdb_length(10),
-            .cdb({48'h0, 16'h0001, 32'h00000010, 8'h00, 8'h2A})  // WRITE_10, LBA=16, Count=1
-        );
+        // WRITE_10: tag=5, len=512, flags=0x00 (Data-Out), lun=0, cdb_len=10
+        send_cbw(32'h00000005, 32'd512, 8'h00, 8'd0, 8'd10, {48'h0, 16'h0001, 32'h00000010, 8'h00, 8'h2A});
 
         // Receive write data
         repeat(128) begin

@@ -10,7 +10,7 @@
 //   - 8-bit ISA data bus
 //   - I/O port decode for FDC (0x3F0-0x3F7) and WD (0x1F0-0x1F7, 0x3F6)
 //   - IRQ generation (IRQ6 for FDC, IRQ14/15 for WD)
-//   - DMA request generation (DRQ2 for FDC)
+//   - DMA request generation (DRQ2 for FDC, DRQ3 for WD in XT mode)
 //   - Wait state insertion via IOCHRDY
 //
 // Author: Claude Code (FluxRipper Project)
@@ -43,9 +43,14 @@ module isa_bus_bridge #(
     output wire        isa_irq14,         // IRQ14 - Primary HDD interrupt
     output wire        isa_irq15,         // IRQ15 - Secondary HDD interrupt
 
-    // DMA signals
+    // DMA signals - FDC
     output wire        isa_drq2,          // DRQ2 - FDC DMA request
     input  wire        isa_dack2_n,       // DACK2 - FDC DMA acknowledge
+
+    // DMA signals - WD HDD (XT mode)
+    output wire        isa_drq3,          // DRQ3 - WD DMA request (XT)
+    input  wire        isa_dack3_n,       // DACK3 - WD DMA acknowledge (XT)
+
     output wire        isa_tc,            // Terminal Count
 
     //=========================================================================
@@ -88,7 +93,8 @@ module isa_bus_bridge #(
     input  wire        fdc_enable,        // Enable FDC decode
     input  wire        wd_enable,         // Enable WD decode
     input  wire [9:0]  wd_io_base,        // WD I/O base (default 0x1F0)
-    input  wire [9:0]  wd_alt_base        // WD alternate base (default 0x3F6)
+    input  wire [9:0]  wd_alt_base,       // WD alternate base (default 0x3F6)
+    input  wire        wd_dma_enable      // Enable WD DMA mode (XT compatibility)
 );
 
     //=========================================================================
@@ -331,8 +337,13 @@ module isa_bus_bridge #(
     assign isa_irq14 = wd_irq_pri && wd_enable;
     assign isa_irq15 = wd_irq_sec && wd_enable;
 
-    // FDC DMA request
+    // FDC DMA request (channel 2)
     assign isa_drq2 = fdc_drq && fdc_enable;
+
+    // WD HDD DMA request (channel 3 - XT mode only)
+    // In XT mode, the WD1002 uses DMA channel 3 for data transfers
+    // In AT mode, PIO is used instead (wd_dma_enable = 0)
+    assign isa_drq3 = wd_drq && wd_enable && wd_dma_enable;
 
     // Terminal count (directly from system)
     assign isa_tc = 1'b0;  // Directly tied or from DMA controller

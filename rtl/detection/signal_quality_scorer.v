@@ -120,6 +120,18 @@ module signal_quality_scorer (
     //-------------------------------------------------------------------------
     integer i;
 
+    // Temporary variables for calculation (moved from unnamed blocks for Verilog compatibility)
+    reg [2:0]  bin_temp;
+    reg [2:0]  best_bin_temp;
+    reg [15:0] best_count_temp;
+    reg [7:0]  edge_score;
+    reg [7:0]  runt_score;
+    reg [7:0]  variance_score;
+    reg [7:0]  histogram_score;
+    reg [15:0] range_temp;
+    reg [15:0] peak_count_temp;
+    reg [15:0] total_count_temp;
+
     always @(posedge clk) begin
         if (reset || clear) begin
             pulse_counter <= 16'd0;
@@ -168,12 +180,9 @@ module signal_quality_scorer (
                     end
 
                     // Update histogram
-                    begin
-                        reg [2:0] bin;
-                        bin = get_bin(pulse_counter);
-                        if (histogram[bin] < 16'hFFFF)
-                            histogram[bin] <= histogram[bin] + 1;
-                    end
+                    bin_temp = get_bin(pulse_counter);
+                    if (histogram[bin_temp] < 16'hFFFF)
+                        histogram[bin_temp] <= histogram[bin_temp] + 1;
                 end
 
                 // Reset counter for next pulse
@@ -194,107 +203,88 @@ module signal_quality_scorer (
                 end
 
                 // Find best histogram bin
-                begin
-                    reg [2:0] best_bin;
-                    reg [15:0] best_count;
-                    best_bin = 3'd0;
-                    best_count = histogram[0];
+                best_bin_temp = 3'd0;
+                best_count_temp = histogram[0];
 
-                    for (i = 1; i < 8; i = i + 1) begin
-                        if (histogram[i] > best_count) begin
-                            best_count = histogram[i];
-                            best_bin = i[2:0];
-                        end
+                for (i = 1; i < 8; i = i + 1) begin
+                    if (histogram[i] > best_count_temp) begin
+                        best_count_temp = histogram[i];
+                        best_bin_temp = i[2:0];
                     end
-                    best_rate_bin <= best_bin;
                 end
+                best_rate_bin <= best_bin_temp;
 
                 // Calculate quality score
-                begin
-                    reg [7:0] edge_score;
-                    reg [7:0] runt_score;
-                    reg [7:0] variance_score;
-                    reg [7:0] histogram_score;
+                // Edge count score (more edges = better)
+                if (edge_count >= 16'd10000)
+                    edge_score = 8'd255;
+                else if (edge_count >= 16'd5000)
+                    edge_score = 8'd224;
+                else if (edge_count >= 16'd1000)
+                    edge_score = 8'd192;
+                else if (edge_count >= 16'd500)
+                    edge_score = 8'd160;
+                else if (edge_count >= 16'd100)
+                    edge_score = 8'd128;
+                else
+                    edge_score = 8'd64;
 
-                    // Edge count score (more edges = better)
-                    if (edge_count >= 16'd10000)
-                        edge_score = 8'd255;
-                    else if (edge_count >= 16'd5000)
-                        edge_score = 8'd224;
-                    else if (edge_count >= 16'd1000)
-                        edge_score = 8'd192;
-                    else if (edge_count >= 16'd500)
-                        edge_score = 8'd160;
-                    else if (edge_count >= 16'd100)
-                        edge_score = 8'd128;
+                // Runt score (fewer runts = better)
+                if (runt_count == 8'd0)
+                    runt_score = 8'd255;
+                else if (runt_count < 8'd5)
+                    runt_score = 8'd224;
+                else if (runt_count < 8'd20)
+                    runt_score = 8'd192;
+                else if (runt_count < 8'd50)
+                    runt_score = 8'd128;
+                else
+                    runt_score = 8'd64;
+
+                // Variance score (smaller range = better)
+                range_temp = max_pulse_width - min_pulse_width;
+
+                if (range_temp < 16'd50)
+                    variance_score = 8'd255;
+                else if (range_temp < 16'd100)
+                    variance_score = 8'd224;
+                else if (range_temp < 16'd200)
+                    variance_score = 8'd192;
+                else if (range_temp < 16'd400)
+                    variance_score = 8'd160;
+                else
+                    variance_score = 8'd128;
+
+                // Histogram score (clear peak = better)
+                // Good signal has >50% of pulses in 2 adjacent bins
+                peak_count_temp = histogram[best_rate_bin];
+                if (best_rate_bin > 3'd0)
+                    peak_count_temp = peak_count_temp + histogram[best_rate_bin - 1];
+                if (best_rate_bin < 3'd7)
+                    peak_count_temp = peak_count_temp + histogram[best_rate_bin + 1];
+
+                total_count_temp = 16'd0;
+                for (i = 0; i < 8; i = i + 1)
+                    total_count_temp = total_count_temp + histogram[i];
+
+                if (total_count_temp > 16'd0) begin
+                    if (peak_count_temp > (total_count_temp >> 1))  // >50%
+                        histogram_score = 8'd255;
+                    else if (peak_count_temp > (total_count_temp >> 2))  // >25%
+                        histogram_score = 8'd192;
                     else
-                        edge_score = 8'd64;
-
-                    // Runt score (fewer runts = better)
-                    if (runt_count == 8'd0)
-                        runt_score = 8'd255;
-                    else if (runt_count < 8'd5)
-                        runt_score = 8'd224;
-                    else if (runt_count < 8'd20)
-                        runt_score = 8'd192;
-                    else if (runt_count < 8'd50)
-                        runt_score = 8'd128;
-                    else
-                        runt_score = 8'd64;
-
-                    // Variance score (smaller range = better)
-                    begin
-                        reg [15:0] range;
-                        range = max_pulse_width - min_pulse_width;
-
-                        if (range < 16'd50)
-                            variance_score = 8'd255;
-                        else if (range < 16'd100)
-                            variance_score = 8'd224;
-                        else if (range < 16'd200)
-                            variance_score = 8'd192;
-                        else if (range < 16'd400)
-                            variance_score = 8'd160;
-                        else
-                            variance_score = 8'd128;
-                    end
-
-                    // Histogram score (clear peak = better)
-                    // Good signal has >50% of pulses in 2 adjacent bins
-                    begin
-                        reg [15:0] peak_count;
-                        reg [15:0] total_count;
-
-                        peak_count = histogram[best_rate_bin];
-                        if (best_rate_bin > 3'd0)
-                            peak_count = peak_count + histogram[best_rate_bin - 1];
-                        if (best_rate_bin < 3'd7)
-                            peak_count = peak_count + histogram[best_rate_bin + 1];
-
-                        total_count = 16'd0;
-                        for (i = 0; i < 8; i = i + 1)
-                            total_count = total_count + histogram[i];
-
-                        if (total_count > 16'd0) begin
-                            if (peak_count > (total_count >> 1))  // >50%
-                                histogram_score = 8'd255;
-                            else if (peak_count > (total_count >> 2))  // >25%
-                                histogram_score = 8'd192;
-                            else
-                                histogram_score = 8'd128;
-                        end else begin
-                            histogram_score = 8'd64;
-                        end
-                    end
-
-                    // Combined quality score (weighted average)
-                    // Edge: 20%, Runt: 30%, Variance: 25%, Histogram: 25%
-                    quality <= (edge_score >> 2) +          // 25%
-                               ({1'b0, runt_score} +
-                                {2'b0, runt_score[7:1]}) >> 2 +  // ~37.5%
-                               (variance_score >> 2) +      // 25%
-                               (histogram_score >> 3);      // 12.5%
+                        histogram_score = 8'd128;
+                end else begin
+                    histogram_score = 8'd64;
                 end
+
+                // Combined quality score (weighted average)
+                // Edge: 20%, Runt: 30%, Variance: 25%, Histogram: 25%
+                quality <= (edge_score >> 2) +          // 25%
+                           ({1'b0, runt_score} +
+                            {2'b0, runt_score[7:1]}) >> 2 +  // ~37.5%
+                           (variance_score >> 2) +      // 25%
+                           (histogram_score >> 3);      // 12.5%
             end
         end
     end

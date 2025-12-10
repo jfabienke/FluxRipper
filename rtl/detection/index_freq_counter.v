@@ -82,6 +82,7 @@ module index_freq_counter (
     reg [2:0]  period_samples;           // Number of periods measured (0-7)
     reg        index_prev;
     reg        index_sync [0:2];         // 3-stage synchronizer
+    reg [26:0] avg_period;               // Average period for classification
 
     wire index_edge;
 
@@ -216,7 +217,6 @@ module index_freq_counter (
                     end else begin
                         // Calculate average for classification
                         // Using period_accumulator / period_samples approximation
-                        reg [26:0] avg_period;
                         case (period_samples)
                             3'd1: avg_period = period_accumulator;
                             3'd2: avg_period = period_accumulator >> 1;

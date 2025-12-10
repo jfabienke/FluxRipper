@@ -91,8 +91,8 @@ module loop_filter_adaptive (
     input  wire [15:0] phase_error,
     input  wire        error_valid,
     input  wire [1:0]  bandwidth,       // 00=narrow, 01=medium, 10=wide, 11=acquisition
-    output reg  [15:0] phase_adj,
-    output reg         phase_adj_valid
+    output wire [15:0] phase_adj,
+    output wire        phase_adj_valid
 );
 
     // Gain presets (Kp, Ki as 8-bit fixed point)
