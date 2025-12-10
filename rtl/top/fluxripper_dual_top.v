@@ -314,6 +314,34 @@ module fluxripper_dual_top (
     wire        fdc_b_detected_40_track;
 
     //-------------------------------------------------------------------------
+    // Flux Analyzer Signals
+    //-------------------------------------------------------------------------
+    wire [1:0]  flux_analyzer_rate_a;
+    wire        flux_analyzer_rate_valid_a;
+    wire        flux_analyzer_rate_locked_a;
+    wire [1:0]  flux_analyzer_rate_b;
+    wire        flux_analyzer_rate_valid_b;
+    wire        flux_analyzer_rate_locked_b;
+
+    //-------------------------------------------------------------------------
+    // Encoding Detector Signals
+    //-------------------------------------------------------------------------
+    wire [2:0]  encoding_detected_a;
+    wire        encoding_valid_a;
+    wire        encoding_locked_a;
+    wire [2:0]  encoding_detected_b;
+    wire        encoding_valid_b;
+    wire        encoding_locked_b;
+
+    //-------------------------------------------------------------------------
+    // Hard-Sector Detection Signals
+    //-------------------------------------------------------------------------
+    wire        hard_sector_detected_a;
+    wire [3:0]  hard_sector_count_a;
+    wire        hard_sector_detected_b;
+    wire [3:0]  hard_sector_count_b;
+
+    //-------------------------------------------------------------------------
     // Drive Profile Detection Signals
     //-------------------------------------------------------------------------
     wire [31:0] drive_profile_a;
@@ -593,6 +621,110 @@ module fluxripper_dual_top (
     );
 
     //-------------------------------------------------------------------------
+    // Flux Analyzer A (Interface A)
+    //-------------------------------------------------------------------------
+    flux_analyzer u_flux_analyzer_a (
+        .clk             (clk),
+        .reset           (reset || sw_reset),
+        .enable          (fdc_a_pll_locked),
+        .flux_transition (fdc_a_flux_valid),
+        .avg_interval    (),
+        .min_interval    (),
+        .max_interval    (),
+        .detected_rate   (flux_analyzer_rate_a),
+        .rate_valid      (flux_analyzer_rate_valid_a),
+        .rate_locked     (flux_analyzer_rate_locked_a)
+    );
+
+    //-------------------------------------------------------------------------
+    // Flux Analyzer B (Interface B)
+    //-------------------------------------------------------------------------
+    flux_analyzer u_flux_analyzer_b (
+        .clk             (clk),
+        .reset           (reset || sw_reset),
+        .enable          (fdc_b_pll_locked && dual_enable),
+        .flux_transition (fdc_b_flux_valid),
+        .avg_interval    (),
+        .min_interval    (),
+        .max_interval    (),
+        .detected_rate   (flux_analyzer_rate_b),
+        .rate_valid      (flux_analyzer_rate_valid_b),
+        .rate_locked     (flux_analyzer_rate_locked_b)
+    );
+
+    //-------------------------------------------------------------------------
+    // Encoding Detector A (Interface A)
+    //-------------------------------------------------------------------------
+    encoding_detector u_encoding_detector_a (
+        .clk              (clk),
+        .reset            (reset || sw_reset),
+        .enable           (fdc_a_pll_locked),
+        .bit_in           (1'b0),              // Not directly used - uses sync signals
+        .bit_valid        (1'b0),
+        // Sync detection inputs - MFM sync is indicated by sync_acquired
+        .mfm_sync         (fdc_a_sync_acquired),
+        .fm_sync          (1'b0),              // Would need separate detector
+        .m2fm_sync        (1'b0),
+        .gcr_cbm_sync     (1'b0),
+        .gcr_apple_sync   (1'b0),
+        .tandy_sync       (1'b0),
+        .detected_encoding(encoding_detected_a),
+        .encoding_valid   (encoding_valid_a),
+        .encoding_locked  (encoding_locked_a),
+        .match_count      (),
+        .sync_history     ()
+    );
+
+    //-------------------------------------------------------------------------
+    // Encoding Detector B (Interface B)
+    //-------------------------------------------------------------------------
+    encoding_detector u_encoding_detector_b (
+        .clk              (clk),
+        .reset            (reset || sw_reset),
+        .enable           (fdc_b_pll_locked && dual_enable),
+        .bit_in           (1'b0),
+        .bit_valid        (1'b0),
+        .mfm_sync         (fdc_b_sync_acquired),
+        .fm_sync          (1'b0),
+        .m2fm_sync        (1'b0),
+        .gcr_cbm_sync     (1'b0),
+        .gcr_apple_sync   (1'b0),
+        .tandy_sync       (1'b0),
+        .detected_encoding(encoding_detected_b),
+        .encoding_valid   (encoding_valid_b),
+        .encoding_locked  (encoding_locked_b),
+        .match_count      (),
+        .sync_history     ()
+    );
+
+    //-------------------------------------------------------------------------
+    // Hard-Sector Detector A (Interface A)
+    //-------------------------------------------------------------------------
+    // Detects hard-sector disks by counting extra pulses between index pulses
+    hard_sector_detector u_hard_sector_a (
+        .clk             (clk),
+        .reset           (reset || sw_reset),
+        .enable          (active_ready_a),
+        .index_pulse     (index_pulse[0] | index_pulse[1]),  // Either drive on interface A
+        .flux_stream     (fdc_a_flux_valid),
+        .sector_detected (hard_sector_detected_a),
+        .sector_count    (hard_sector_count_a)
+    );
+
+    //-------------------------------------------------------------------------
+    // Hard-Sector Detector B (Interface B)
+    //-------------------------------------------------------------------------
+    hard_sector_detector u_hard_sector_b (
+        .clk             (clk),
+        .reset           (reset || sw_reset),
+        .enable          (active_ready_b && dual_enable),
+        .index_pulse     (index_pulse[2] | index_pulse[3]),  // Either drive on interface B
+        .flux_stream     (fdc_b_flux_valid),
+        .sector_detected (hard_sector_detected_b),
+        .sector_count    (hard_sector_count_b)
+    );
+
+    //-------------------------------------------------------------------------
     // Drive Profile Detector A (Interface A)
     //-------------------------------------------------------------------------
     // Aggregates detection signals to infer drive characteristics
@@ -610,15 +742,15 @@ module fluxripper_dual_top (
         .track_density_valid(fdc_a_track_density_detected),
         .detected_40_track(fdc_a_detected_40_track),
 
-        // Data rate - connect when flux_analyzer is wired
-        .data_rate_valid(1'b0),          // TODO: Wire from flux_analyzer_a
-        .detected_data_rate(2'b10),      // Default 500K
-        .data_rate_locked(1'b0),
+        // Data rate - from flux analyzer
+        .data_rate_valid(flux_analyzer_rate_valid_a),
+        .detected_data_rate(flux_analyzer_rate_a),
+        .data_rate_locked(flux_analyzer_rate_locked_a),
 
-        // Encoding - connect when encoding_detector is wired
-        .encoding_valid(1'b0),           // TODO: Wire from encoding_detector_a
-        .detected_encoding(3'b000),      // Default MFM
-        .encoding_locked(1'b0),
+        // Encoding - from encoding detector
+        .encoding_valid(encoding_valid_a),
+        .detected_encoding(encoding_detected_a),
+        .encoding_locked(encoding_locked_a),
 
         // PLL quality
         .lock_quality(fdc_a_lock_quality),
@@ -631,8 +763,8 @@ module fluxripper_dual_top (
         .head_load_active(fdc_a_head_load),
 
         // Hard-sector detection
-        .sector_pulse_detected(1'b0),    // TODO: Wire from flux stream
-        .sector_count(4'd0),
+        .sector_pulse_detected(hard_sector_detected_a),
+        .sector_count(hard_sector_count_a),
 
         // Track position
         .current_track(fdc_a_current_track),
@@ -673,15 +805,15 @@ module fluxripper_dual_top (
         .track_density_valid(fdc_b_track_density_detected),
         .detected_40_track(fdc_b_detected_40_track),
 
-        // Data rate
-        .data_rate_valid(1'b0),          // TODO: Wire from flux_analyzer_b
-        .detected_data_rate(2'b10),
-        .data_rate_locked(1'b0),
+        // Data rate - from flux analyzer
+        .data_rate_valid(flux_analyzer_rate_valid_b),
+        .detected_data_rate(flux_analyzer_rate_b),
+        .data_rate_locked(flux_analyzer_rate_locked_b),
 
-        // Encoding
-        .encoding_valid(1'b0),           // TODO: Wire from encoding_detector_b
-        .detected_encoding(3'b000),
-        .encoding_locked(1'b0),
+        // Encoding - from encoding detector
+        .encoding_valid(encoding_valid_b),
+        .detected_encoding(encoding_detected_b),
+        .encoding_locked(encoding_locked_b),
 
         // PLL quality
         .lock_quality(fdc_b_lock_quality),
@@ -694,13 +826,13 @@ module fluxripper_dual_top (
         .head_load_active(fdc_b_head_load),
 
         // Hard-sector detection
-        .sector_pulse_detected(1'b0),
-        .sector_count(4'd0),
+        .sector_pulse_detected(hard_sector_detected_b),
+        .sector_count(hard_sector_count_b),
 
         // Track position
         .current_track(fdc_b_current_track),
 
-        // Density probing - stub
+        // Density probing - stub (would need dedicated hardware for automatic probing)
         .probe_request(),
         .probe_data_rate(),
         .probe_complete(1'b0),

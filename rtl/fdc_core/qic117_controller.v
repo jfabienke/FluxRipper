@@ -996,16 +996,20 @@ module qic117_controller #(
     //=========================================================================
 
     // Generate INDEX pulse at segment boundaries during streaming
+    // INDEX pulse is generated when data streamer detects segment complete
     always @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             index_reg <= 1'b0;
             index_timer <= 20'd0;
         end else if (!tape_mode_en) begin
             index_reg <= 1'b0;
+            index_timer <= 20'd0;
         end else begin
-            // TODO: Generate INDEX at actual segment boundaries
-            // For now, just keep it low
-            if (index_timer > 0) begin
+            // Trigger INDEX pulse on segment boundary detection
+            if (streamer_segment_complete) begin
+                index_timer <= INDEX_PULSE_CLKS;
+                index_reg <= 1'b1;
+            end else if (index_timer > 0) begin
                 index_timer <= index_timer - 1'b1;
                 index_reg <= 1'b1;
             end else begin
@@ -1013,6 +1017,54 @@ module qic117_controller #(
             end
         end
     end
+
+    //=========================================================================
+    // Write Data Encoder
+    //=========================================================================
+    // MFM encoder for tape write operations
+    wire        write_encoder_flux;
+    wire        write_encoder_valid;
+    wire        write_encoder_ready;
+    wire        write_encoder_done;
+
+    // Write bit clock generation (based on tape data rate - typically 500Kbps for QIC-80)
+    // At 200MHz, 500Kbps MFM = 200 clocks per MFM cell
+    localparam WRITE_BIT_CLK_PERIOD = CLK_FREQ_HZ / 1_000_000;  // 200 clocks for 1MHz MFM rate
+
+    reg [9:0]   write_bit_clk_counter;
+    reg         write_bit_clk;
+
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            write_bit_clk_counter <= 10'd0;
+            write_bit_clk <= 1'b0;
+        end else if (!write_enable) begin
+            write_bit_clk_counter <= 10'd0;
+            write_bit_clk <= 1'b0;
+        end else begin
+            if (write_bit_clk_counter >= WRITE_BIT_CLK_PERIOD - 1) begin
+                write_bit_clk_counter <= 10'd0;
+                write_bit_clk <= 1'b1;
+            end else begin
+                write_bit_clk_counter <= write_bit_clk_counter + 1'b1;
+                write_bit_clk <= 1'b0;
+            end
+        end
+    end
+
+    // MFM encoder for tape write
+    mfm_encoder_serial u_tape_write_encoder (
+        .clk           (clk),
+        .reset         (~reset_n),
+        .enable        (write_enable),
+        .bit_clk       (write_bit_clk),
+        .data_in       (write_data),
+        .data_valid    (write_strobe),
+        .flux_out      (write_encoder_flux),
+        .flux_valid    (write_encoder_valid),
+        .byte_complete (write_encoder_done),
+        .ready         (write_encoder_ready)
+    );
 
     //=========================================================================
     // Output Assignments
@@ -1030,8 +1082,8 @@ module qic117_controller #(
     // Motor control - driven by state machine in main always block above
     // (tape_motor_on is already assigned in the ST_* cases)
 
-    // Data passthrough - from streamer
-    assign tape_wdata = 1'b0;  // TODO: Connect to write path
+    // Data passthrough - from streamer for read, from encoder for write
+    assign tape_wdata = write_enable ? (write_encoder_flux & write_encoder_valid) : 1'b0;
     assign read_data  = streamer_data_byte;
     assign read_valid = streamer_data_valid;
 

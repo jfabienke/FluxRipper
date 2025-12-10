@@ -293,14 +293,107 @@ module fluxripper_hdd_top (
     );
 
     //-------------------------------------------------------------------------
+    // Write Data Encoder
+    //-------------------------------------------------------------------------
+    // MFM encoder for write operations
+    wire [7:0]  write_data_byte;
+    wire        write_data_valid;
+    wire        mfm_encoder_flux;
+    wire        mfm_encoder_valid;
+    wire        mfm_encoder_ready;
+    wire        mfm_encoder_done;
+
+    // RLL encoder for write operations
+    wire [15:0] rll_encoder_code;
+    wire [4:0]  rll_encoder_bits;
+    wire        rll_encoder_valid;
+    wire        rll_encoder_ready;
+
+    // Write bit clock (derived from NCO for correct data rate)
+    wire        write_bit_clk = nco_bit_clk;
+
+    // Select encoder based on mode (0=MFM, 1=RLL)
+    wire        use_rll_encoder = (hdd_data_rate == 3'b001);
+    wire        encoder_flux_out;
+    wire        encoder_flux_valid;
+
+    // MFM encoder for HDD writes
+    mfm_encoder_serial u_hdd_mfm_encoder (
+        .clk           (clk_hdd),
+        .reset         (reset),
+        .enable        ((cmd_write_0 || cmd_write_1) && !use_rll_encoder),
+        .bit_clk       (write_bit_clk),
+        .data_in       (write_data_byte),
+        .data_valid    (write_data_valid && !use_rll_encoder),
+        .flux_out      (mfm_encoder_flux),
+        .flux_valid    (mfm_encoder_valid),
+        .byte_complete (mfm_encoder_done),
+        .ready         (mfm_encoder_ready)
+    );
+
+    // RLL encoder for HDD writes
+    rll_2_7_encoder u_hdd_rll_encoder (
+        .clk           (clk_hdd),
+        .reset         (reset),
+        .enable        ((cmd_write_0 || cmd_write_1) && use_rll_encoder),
+        .data_in       (write_data_byte),
+        .data_valid    (write_data_valid && use_rll_encoder),
+        .data_ready    (rll_encoder_ready),
+        .code_out      (rll_encoder_code),
+        .code_bits     (rll_encoder_bits),
+        .code_valid    (rll_encoder_valid),
+        .code_ready    (1'b1)
+    );
+
+    // RLL serial output shift register
+    reg [15:0]  rll_shift_reg;
+    reg [4:0]   rll_shift_count;
+    reg         rll_shift_active;
+
+    always @(posedge clk_hdd) begin
+        if (reset) begin
+            rll_shift_reg <= 16'd0;
+            rll_shift_count <= 5'd0;
+            rll_shift_active <= 1'b0;
+        end else if (rll_encoder_valid && !rll_shift_active) begin
+            // Load new code word
+            rll_shift_reg <= rll_encoder_code;
+            rll_shift_count <= rll_encoder_bits;
+            rll_shift_active <= 1'b1;
+        end else if (rll_shift_active && write_bit_clk) begin
+            // Shift out bits MSB first
+            rll_shift_reg <= {rll_shift_reg[14:0], 1'b0};
+            rll_shift_count <= rll_shift_count - 1'b1;
+            if (rll_shift_count == 5'd1) begin
+                rll_shift_active <= 1'b0;
+            end
+        end
+    end
+
+    wire rll_serial_out = rll_shift_reg[15];
+    wire rll_serial_valid = rll_shift_active && write_bit_clk;
+
+    // Select encoder output based on mode
+    assign encoder_flux_out = use_rll_encoder ? rll_serial_out : mfm_encoder_flux;
+    assign encoder_flux_valid = use_rll_encoder ? rll_serial_valid : mfm_encoder_valid;
+
+    // Write data for data mux (active only during write commands)
+    wire ctrl_write_data = (cmd_write_0 || cmd_write_1) ?
+                           (encoder_flux_out & encoder_flux_valid) : 1'b0;
+    wire ctrl_write_data_p = ctrl_write_data;
+    wire ctrl_write_data_n = ~ctrl_write_data;
+
+    // Write data source (from track buffer or direct)
+    // For now, tie to zero - firmware will fill track buffer before write
+    assign write_data_byte = 8'h00;
+    assign write_data_valid = 1'b0;
+
+    //-------------------------------------------------------------------------
     // 20-pin Data Path Multiplexer
     //-------------------------------------------------------------------------
     wire        active_read_data;
     wire        active_read_data_p;
     wire        active_read_data_n;
-    wire        ctrl_write_data = 1'b0;   // TODO: Connect to encoder
-    wire        ctrl_write_data_p = 1'b0;
-    wire        ctrl_write_data_n = 1'b1;
 
     hdd_data_mux u_data_mux (
         .clk(clk_hdd),

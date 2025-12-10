@@ -3,14 +3,16 @@
 // Encapsulates a complete FDC data path for dual-interface support
 //
 // Contains: DPLL, AM Detector, Step Controller, Command FSM, CRC, Zone Calculator,
-//           Track Width Analyzer (for 40/80-track auto-detection)
+//           Track Width Analyzer (for 40/80-track auto-detection),
+//           QIC-117 Tape Controller (for floppy-interface tape drives)
 // Parameterized for drive ID offset (0 for Interface A, 2 for Interface B)
 //
 // Supports Macintosh variable-speed GCR with automatic zone-based data rates
 // Supports automatic double-step detection for 40-track disks in 80-track drives
+// Supports QIC-40/80/3010/3020 floppy-interface tape drives via TDR register
 //
 // Target: AMD Spartan UltraScale+ SCU35
-// Updated: 2025-12-03 22:20
+// Updated: 2025-12-10 - Added QIC-117 tape controller integration
 //-----------------------------------------------------------------------------
 
 module fdc_core_instance #(
@@ -108,7 +110,26 @@ module fdc_core_instance #(
 
     // Track density auto-detection status
     output wire        track_density_detected, // Track analysis complete
-    output wire        detected_40_track       // 1 if 40-track disk detected
+    output wire        detected_40_track,      // 1 if 40-track disk detected
+
+    //-------------------------------------------------------------------------
+    // QIC-117 Tape Mode Control (directly from TDR register)
+    //-------------------------------------------------------------------------
+    input  wire        tape_mode_en,          // Tape mode enable (TDR[7])
+    input  wire [2:0]  tape_select,           // Tape drive select (TDR[2:0])
+    input  wire        tape_cartridge_in,     // Cartridge present sensor
+    input  wire        tape_write_protect,    // Write protect sensor
+
+    //-------------------------------------------------------------------------
+    // QIC-117 Tape Status Outputs
+    //-------------------------------------------------------------------------
+    output wire [7:0]  tape_status,           // Tape status byte
+    output wire [15:0] tape_segment,          // Current segment position
+    output wire [4:0]  tape_track,            // Current track position
+    output wire [5:0]  tape_last_command,     // Last decoded command
+    output wire        tape_command_active,   // Command in progress
+    output wire        tape_ready,            // Tape drive ready
+    output wire        tape_error             // Tape error condition
 );
 
     //-------------------------------------------------------------------------
@@ -184,6 +205,60 @@ module fdc_core_instance #(
     wire        edge_detected;
     wire [31:0] edge_timestamp;
 
+    // Write path signals
+    wire [7:0]  cmd_write_data;
+    wire        cmd_write_valid;
+    wire        write_encoder_flux;
+    wire        write_encoder_valid;
+    wire        write_encoder_ready;
+    wire        write_encoder_done;
+
+    // Bit clock for write encoder (derived from data rate)
+    // 250K=4us/bit=800clk, 300K=3.33us=666clk, 500K=2us=400clk, 1M=1us=200clk
+    reg [9:0]   write_bit_clk_counter;
+    reg         write_bit_clk;
+    wire [9:0]  write_bit_clk_period;
+
+    // Data rate to bit clock period (for 200MHz clock, MFM needs 2x bit rate)
+    // MFM cell is half of bit period
+    assign write_bit_clk_period = (data_rate == 2'b00) ? 10'd400 :  // 250Kbps -> 400 clks
+                                   (data_rate == 2'b01) ? 10'd333 :  // 300Kbps -> 333 clks
+                                   (data_rate == 2'b10) ? 10'd200 :  // 500Kbps -> 200 clks
+                                                          10'd100;   // 1Mbps -> 100 clks
+
+    // Generate write bit clock
+    always @(posedge clk) begin
+        if (reset || !cmd_write_enable) begin
+            write_bit_clk_counter <= 10'd0;
+            write_bit_clk <= 1'b0;
+        end else begin
+            if (write_bit_clk_counter >= write_bit_clk_period - 1) begin
+                write_bit_clk_counter <= 10'd0;
+                write_bit_clk <= 1'b1;
+            end else begin
+                write_bit_clk_counter <= write_bit_clk_counter + 1'b1;
+                write_bit_clk <= 1'b0;
+            end
+        end
+    end
+
+    //-------------------------------------------------------------------------
+    // QIC-117 Tape Controller Signals
+    //-------------------------------------------------------------------------
+    wire        qic_trk0_out;
+    wire        qic_index_out;
+    wire        qic_motor_on;
+    wire        qic_direction;
+    wire [7:0]  qic_read_data;
+    wire        qic_read_valid;
+    wire [5:0]  qic_current_command;
+    wire        qic_command_strobe;
+    wire        qic_block_sync;
+    wire [8:0]  qic_byte_in_block;
+    wire [4:0]  qic_block_in_segment;
+    wire        qic_segment_complete;
+    wire        qic_file_mark;
+
     //-------------------------------------------------------------------------
     // Drive Multiplexer
     //-------------------------------------------------------------------------
@@ -201,14 +276,14 @@ module fdc_core_instance #(
     assign drv0_dir        = ~drive_sel_local ? step_dir : 1'b0;
     assign drv0_head_sel   = ~drive_sel_local ? cmd_head_select[0] : 1'b0;
     assign drv0_write_gate = ~drive_sel_local ? cmd_write_enable : 1'b0;
-    assign drv0_write_data = 1'b0;  // TODO: Connect to write path
+    assign drv0_write_data = ~drive_sel_local ? (write_encoder_flux & write_encoder_valid) : 1'b0;
 
     // Drive 1 outputs (active when drive_sel_local == 1)
     assign drv1_step       = drive_sel_local ? step_pulse : 1'b0;
     assign drv1_dir        = drive_sel_local ? step_dir : 1'b0;
     assign drv1_head_sel   = drive_sel_local ? cmd_head_select[0] : 1'b0;
     assign drv1_write_gate = drive_sel_local ? cmd_write_enable : 1'b0;
-    assign drv1_write_data = 1'b0;  // TODO: Connect to write path
+    assign drv1_write_data = drive_sel_local ? (write_encoder_flux & write_encoder_valid) : 1'b0;
 
     //-------------------------------------------------------------------------
     // Macintosh Zone Calculator
@@ -283,6 +358,23 @@ module fdc_core_instance #(
     );
 
     //-------------------------------------------------------------------------
+    // MFM Write Encoder
+    //-------------------------------------------------------------------------
+    // Converts parallel bytes from command FSM to serial MFM-encoded flux stream
+    mfm_encoder_serial u_write_encoder (
+        .clk           (clk),
+        .reset         (reset),
+        .enable        (cmd_write_enable),
+        .bit_clk       (write_bit_clk),
+        .data_in       (cmd_write_data),
+        .data_valid    (cmd_write_valid),
+        .flux_out      (write_encoder_flux),
+        .flux_valid    (write_encoder_valid),
+        .byte_complete (write_encoder_done),
+        .ready         (write_encoder_ready)
+    );
+
+    //-------------------------------------------------------------------------
     // Step Controller
     //-------------------------------------------------------------------------
     step_controller u_step_ctrl (
@@ -349,8 +441,8 @@ module fdc_core_instance #(
         .sync_acquired(am_sync_acquired),
         .a1_detected(am_a1_detected),
         .write_enable(cmd_write_enable),
-        .write_data(),
-        .write_valid(),
+        .write_data(cmd_write_data),
+        .write_valid(cmd_write_valid),
         .crc_reset(cmd_crc_reset),
         .crc_valid(crc_valid),
         .crc_value(crc_value),
@@ -398,11 +490,65 @@ module fdc_core_instance #(
     end
 
     //-------------------------------------------------------------------------
+    // QIC-117 Tape Controller
+    //-------------------------------------------------------------------------
+    // Instantiated for QIC-40/80/3010/3020 floppy-interface tape drive support
+    // In tape mode, STEP pulses become command bits, TRK0 becomes status output
+    qic117_controller #(
+        .CLK_FREQ_HZ(200_000_000)
+    ) u_qic117 (
+        .clk               (clk),
+        .reset_n           (~reset),
+        .tape_mode_en      (tape_mode_en),
+        .tape_select       (tape_select),
+        // FDC signal intercept
+        .step_in           (step_pulse),              // STEP from step controller
+        .dir_in            (step_dir),
+        .trk0_out          (qic_trk0_out),
+        .index_out         (qic_index_out),
+        // Drive interface
+        .tape_motor_on     (qic_motor_on),
+        .tape_direction    (qic_direction),
+        .tape_rdata        (active_read_data),
+        .tape_wdata        (),                        // Not connected yet
+        .tape_write_protect(tape_write_protect),
+        .tape_cartridge_in (tape_cartridge_in),
+        // Data interface
+        .write_enable      (1'b0),
+        .write_data        (8'd0),
+        .write_strobe      (1'b0),
+        .read_data         (qic_read_data),
+        .read_valid        (qic_read_valid),
+        // MFM data from DPLL
+        .mfm_data_in       (dpll_data_bit),
+        .mfm_clock         (dpll_data_ready),
+        .dpll_locked       (dpll_locked),
+        // Status outputs
+        .current_command   (qic_current_command),
+        .command_strobe    (qic_command_strobe),
+        .segment_position  (tape_segment),
+        .track_position    (tape_track),
+        .tape_status       (tape_status),
+        .command_active    (tape_command_active),
+        .tape_ready        (tape_ready),
+        .tape_error        (tape_error),
+        // Data streamer status
+        .block_sync        (qic_block_sync),
+        .byte_in_block     (qic_byte_in_block),
+        .block_in_segment  (qic_block_in_segment),
+        .segment_complete  (qic_segment_complete),
+        .file_mark_detect  (qic_file_mark)
+    );
+
+    // Assign tape last command output
+    assign tape_last_command = qic_current_command;
+
+    //-------------------------------------------------------------------------
     // Output Assignments
     //-------------------------------------------------------------------------
     assign current_track  = step_current_track;
     assign seek_complete  = step_seek_complete;
-    assign at_track0      = step_at_track0;
+    assign at_track0      = tape_mode_en ? qic_trk0_out : step_at_track0;  // In tape mode, TRK0 is status
     assign pll_locked     = dpll_locked;
     assign lock_quality   = dpll_quality;
     assign sync_acquired  = am_sync_acquired;
@@ -410,7 +556,7 @@ module fdc_core_instance #(
     // Flux capture outputs
     assign flux_valid     = flux_edge_detected;
     assign flux_timestamp = timestamp_counter;
-    assign flux_index     = active_index;
+    assign flux_index     = tape_mode_en ? qic_index_out : active_index;  // In tape mode, INDEX is segment marker
 
     // 8" drive support - head load solenoid control
     assign head_load      = step_head_load;

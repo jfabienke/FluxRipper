@@ -60,9 +60,11 @@ module usb_device_core_v2 (
 
     // Device configuration
     input  wire [6:0] device_address,
+    input  wire       high_speed,         // High-speed mode indicator
     output reg        set_address,
     output reg  [6:0] new_address,
     output reg        set_configured,
+    output reg  [7:0] new_config,         // New configuration value
 
     // Control endpoint interface (EP0)
     output reg        setup_valid,
@@ -74,6 +76,7 @@ module usb_device_core_v2 (
     input  wire       ctrl_in_last,
     input  wire       ctrl_stall,
     input  wire       ctrl_ack,
+    output reg        ctrl_phase_done,    // Control transfer phase complete
 
     // Bulk endpoint interface (EP1, EP2, etc.)
     output reg  [3:0] token_ep,
@@ -82,6 +85,7 @@ module usb_device_core_v2 (
     output reg        rx_data_valid,
     output reg  [7:0] rx_data,
     output reg        rx_last,
+    output reg        rx_crc_ok,          // Received packet CRC valid
     input  wire [7:0] tx_data,
     input  wire       tx_valid,
     input  wire       tx_last,
@@ -346,8 +350,9 @@ module usb_device_core_v2 (
                 addr_match <= (rx_addr == device_address) || (device_address == 7'd0);
 
                 // Validate CRC5 (should be 0x0C residual after including CRC)
-                // Simplified: accept if non-zero token received
-                crc5_ok <= 1'b1;  // TODO: Implement proper CRC5 check
+                // USB CRC5 polynomial: G(X) = X^5 + X^2 + 1
+                // Check that calculated CRC5 matches received CRC5
+                crc5_ok <= (crc5_calc == 5'b01100);  // Residual should be 0x0C
             end
         end
     end
@@ -576,19 +581,43 @@ module usb_device_core_v2 (
     end
 
     //==========================================================================
-    // Device address update
+    // Device address update and configuration
     //==========================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             set_address <= 1'b0;
             new_address <= 7'd0;
             set_configured <= 1'b0;
+            new_config <= 8'd0;
         end else begin
             set_address <= 1'b0;
             set_configured <= 1'b0;
 
             // These signals are set by the control endpoint logic
             // when SET_ADDRESS or SET_CONFIGURATION requests are processed
+        end
+    end
+
+    //==========================================================================
+    // Control phase tracking and CRC status
+    //==========================================================================
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            ctrl_phase_done <= 1'b0;
+            rx_crc_ok <= 1'b0;
+        end else begin
+            ctrl_phase_done <= 1'b0;
+            rx_crc_ok <= 1'b0;
+
+            // Signal control phase completion on ACK transmission
+            if (state == ST_TX_HS && hs_pid == PID_ACK && utmi_txready) begin
+                ctrl_phase_done <= (rx_ep == 4'd0);
+            end
+
+            // Update CRC status after data check
+            if (state == ST_CHK_DATA) begin
+                rx_crc_ok <= crc16_ok;
+            end
         end
     end
 

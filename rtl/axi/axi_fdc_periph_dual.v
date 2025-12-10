@@ -156,6 +156,14 @@ module axi_fdc_periph_dual (
     input  wire        drive_profile_locked_b,   // Profile stable for B
 
     //-------------------------------------------------------------------------
+    // Disk Change Inputs (directly from drive interface)
+    //-------------------------------------------------------------------------
+    input  wire        dskchg_a_drv0,            // Disk change for Interface A, Drive 0
+    input  wire        dskchg_a_drv1,            // Disk change for Interface A, Drive 1
+    input  wire        dskchg_b_drv0,            // Disk change for Interface B, Drive 0
+    input  wire        dskchg_b_drv1,            // Disk change for Interface B, Drive 1
+
+    //-------------------------------------------------------------------------
     // QIC-117 Tape Interface
     //-------------------------------------------------------------------------
     // Tape mode control
@@ -637,7 +645,11 @@ module axi_fdc_periph_dual (
 
                         ADDR_DIR_CCR: begin
                             // Return DIR on read (disk change bit)
-                            s_axi_rdata <= {24'd0, 8'h00};  // TODO: Connect dskchg
+                            // DIR: Bit 7 = DSKCHG (disk changed - active high, inverted from pin)
+                            // Based on currently selected drive on Interface A
+                            s_axi_rdata <= {24'd0,
+                                           (if_a_drive_sel[0] ? dskchg_a_drv1 : dskchg_a_drv0), // Bit 7: DSKCHG
+                                           7'd0};                                               // Bits 6-0: reserved
                         end
 
                         ADDR_QUALITY: begin

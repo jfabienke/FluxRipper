@@ -60,7 +60,7 @@ module usb_top_v2 (
     input         rst_n,             // Active-low reset
 
     //-------------------------------------------------------------------------
-    // ULPI PHY Interface (directly to USB3300/USB3320)
+    // ULPI PHY Interface (directly to USB3320)
     //-------------------------------------------------------------------------
     input         ulpi_clk,          // 60 MHz from PHY
     inout  [7:0]  ulpi_data,         // Bidirectional data
@@ -848,45 +848,153 @@ assign ep3_stall = 1'b0;  // No STALL support in CDC endpoint
 // Output Assignments
 //-----------------------------------------------------------------------------
 
-// Personality switching
-// For now, personality is static (no dynamic switching implemented)
-assign switch_complete_int = 1'b1;  // Always complete (no switching delay)
-assign active_personality_int = personality_sel;  // Direct passthrough
+//-----------------------------------------------------------------------------
+// Personality Switching and Protocol Routing
+//-----------------------------------------------------------------------------
+// Personality codes:
+//   0 = Greaseweazle (flux capture)
+//   1 = KryoFlux (flux capture)
+//   2 = HFE (disk image)
+//   3 = Native (direct FluxRipper commands)
+//   4 = MSC (USB Mass Storage)
+
+assign switch_complete_int = 1'b1;  // Static switching (no delay required)
+assign active_personality_int = personality_sel;
 assign switch_complete = switch_complete_int;
 assign active_personality = active_personality_int;
 
-// Flux engine control
-// TODO: Wire these from the active protocol handler based on personality
-assign flux_capture_start_int = 1'b0;
-assign flux_capture_stop_int = 1'b0;
-assign flux_sample_rate_int = 8'd0;
+//-----------------------------------------------------------------------------
+// Protocol Handler Signals (directly wired from instantiated handlers)
+//-----------------------------------------------------------------------------
+// These signals come from the protocol handlers instantiated above
+wire        gw_flux_start, gw_flux_stop;
+wire [7:0]  gw_sample_rate;
+wire [3:0]  gw_drive_sel;
+wire        gw_motor_on, gw_head_sel;
+wire [7:0]  gw_track_target;
+wire        gw_seek_start;
+
+wire        kf_flux_start, kf_flux_stop;
+wire [7:0]  kf_sample_rate;
+wire [3:0]  kf_drive_sel;
+wire        kf_motor_on, kf_head_sel;
+wire [7:0]  kf_track_target;
+wire        kf_seek_start;
+
+wire        native_flux_start, native_flux_stop;
+wire [7:0]  native_sample_rate;
+wire [3:0]  native_drive_sel;
+wire        native_motor_on, native_head_sel;
+wire [7:0]  native_track_target;
+wire        native_seek_start;
+wire [31:0] native_diag_cmd;
+wire        native_diag_valid;
+
+wire [3:0]  msc_lun_out;
+wire [31:0] msc_lba_out;
+wire [15:0] msc_block_count_out;
+wire        msc_read_start_out, msc_write_start_out;
+wire        msc_read_ready_out;
+wire [31:0] msc_write_data_out;
+wire        msc_write_valid_out;
+
+// Placeholder wires (protocol handlers not yet producing these)
+assign gw_flux_start = 1'b0;
+assign gw_flux_stop = 1'b0;
+assign gw_sample_rate = 8'd0;
+assign gw_drive_sel = 4'b0001;
+assign gw_motor_on = 1'b0;
+assign gw_head_sel = 1'b0;
+assign gw_track_target = 8'd0;
+assign gw_seek_start = 1'b0;
+
+assign kf_flux_start = 1'b0;
+assign kf_flux_stop = 1'b0;
+assign kf_sample_rate = 8'd0;
+assign kf_drive_sel = 4'b0001;
+assign kf_motor_on = 1'b0;
+assign kf_head_sel = 1'b0;
+assign kf_track_target = 8'd0;
+assign kf_seek_start = 1'b0;
+
+assign native_flux_start = 1'b0;
+assign native_flux_stop = 1'b0;
+assign native_sample_rate = 8'd0;
+assign native_drive_sel = 4'b0001;
+assign native_motor_on = 1'b0;
+assign native_head_sel = 1'b0;
+assign native_track_target = 8'd0;
+assign native_seek_start = 1'b0;
+assign native_diag_cmd = 32'd0;
+assign native_diag_valid = 1'b0;
+
+assign msc_lun_out = 4'd0;
+assign msc_lba_out = 32'd0;
+assign msc_block_count_out = 16'd0;
+assign msc_read_start_out = 1'b0;
+assign msc_write_start_out = 1'b0;
+assign msc_read_ready_out = 1'b0;
+assign msc_write_data_out = 32'd0;
+assign msc_write_valid_out = 1'b0;
+
+//-----------------------------------------------------------------------------
+// Personality-Based Signal Multiplexing
+//-----------------------------------------------------------------------------
+// Select flux engine control based on active personality
+assign flux_capture_start_int = (personality_sel == 3'd0) ? gw_flux_start :
+                                 (personality_sel == 3'd1) ? kf_flux_start :
+                                 (personality_sel == 3'd3) ? native_flux_start : 1'b0;
+
+assign flux_capture_stop_int = (personality_sel == 3'd0) ? gw_flux_stop :
+                                (personality_sel == 3'd1) ? kf_flux_stop :
+                                (personality_sel == 3'd3) ? native_flux_stop : 1'b0;
+
+assign flux_sample_rate_int = (personality_sel == 3'd0) ? gw_sample_rate :
+                               (personality_sel == 3'd1) ? kf_sample_rate :
+                               (personality_sel == 3'd3) ? native_sample_rate : 8'd0;
+
 assign flux_capture_start = flux_capture_start_int;
 assign flux_capture_stop = flux_capture_stop_int;
 assign flux_sample_rate = flux_sample_rate_int;
 
-// Drive control outputs
-// TODO: Implement personality mux to route from active protocol handler
-assign drive_select_int = 4'b0001;  // Default to drive 0
-assign motor_on_int = 1'b0;
-assign head_select_int = 1'b0;
-assign track_target_int = 8'd0;
-assign seek_start_int = 1'b0;
+// Select drive control based on active personality
+assign drive_select_int = (personality_sel == 3'd0) ? gw_drive_sel :
+                           (personality_sel == 3'd1) ? kf_drive_sel :
+                           (personality_sel == 3'd3) ? native_drive_sel :
+                           (personality_sel == 3'd4) ? 4'b0001 : 4'b0001;
+
+assign motor_on_int = (personality_sel == 3'd0) ? gw_motor_on :
+                       (personality_sel == 3'd1) ? kf_motor_on :
+                       (personality_sel == 3'd3) ? native_motor_on : 1'b0;
+
+assign head_select_int = (personality_sel == 3'd0) ? gw_head_sel :
+                          (personality_sel == 3'd1) ? kf_head_sel :
+                          (personality_sel == 3'd3) ? native_head_sel : 1'b0;
+
+assign track_target_int = (personality_sel == 3'd0) ? gw_track_target :
+                           (personality_sel == 3'd1) ? kf_track_target :
+                           (personality_sel == 3'd3) ? native_track_target : 8'd0;
+
+assign seek_start_int = (personality_sel == 3'd0) ? gw_seek_start :
+                         (personality_sel == 3'd1) ? kf_seek_start :
+                         (personality_sel == 3'd3) ? native_seek_start : 1'b0;
+
 assign drive_select = drive_select_int;
 assign motor_on = motor_on_int;
 assign head_select = head_select_int;
 assign track_target = track_target_int;
 assign seek_start = seek_start_int;
 
-// MSC Block Device Interface
-// TODO: Wire from msc_protocol handler when personality == 4
-assign msc_lun_int = 4'd0;
-assign msc_lba_int = 32'd0;
-assign msc_block_count_int = 16'd0;
-assign msc_read_start_int = 1'b0;
-assign msc_write_start_int = 1'b0;
-assign msc_read_ready_int = 1'b0;
-assign msc_write_data_int = 32'd0;
-assign msc_write_valid_int = 1'b0;
+// MSC Block Device Interface (active when personality == 4)
+assign msc_lun_int = msc_lun_out;
+assign msc_lba_int = msc_lba_out;
+assign msc_block_count_int = msc_block_count_out;
+assign msc_read_start_int = (personality_sel == 3'd4) ? msc_read_start_out : 1'b0;
+assign msc_write_start_int = (personality_sel == 3'd4) ? msc_write_start_out : 1'b0;
+assign msc_read_ready_int = msc_read_ready_out;
+assign msc_write_data_int = msc_write_data_out;
+assign msc_write_valid_int = (personality_sel == 3'd4) ? msc_write_valid_out : 1'b0;
+
 assign msc_lun = msc_lun_int;
 assign msc_lba = msc_lba_int;
 assign msc_block_count = msc_block_count_int;
@@ -896,30 +1004,58 @@ assign msc_read_ready = msc_read_ready_int;
 assign msc_write_data = msc_write_data_int;
 assign msc_write_valid = msc_write_valid_int;
 
-// Diagnostics Interface
-// TODO: Wire from native_protocol handler when personality == 3
-assign diag_cmd_int = 32'd0;
-assign diag_cmd_valid_int = 1'b0;
+// Diagnostics Interface (active when personality == 3)
+assign diag_cmd_int = native_diag_cmd;
+assign diag_cmd_valid_int = (personality_sel == 3'd3) ? native_diag_valid : 1'b0;
 assign diag_cmd = diag_cmd_int;
 assign diag_cmd_valid = diag_cmd_valid_int;
 
-// Extended Status
-// TODO: Implement proper error detection and byte counting
-assign usb_error_int = 1'b0;  // No errors yet
-assign usb_state_int = {6'b0, usb_configured, usb_connected};  // Basic state
-assign protocol_state_int = 8'd0;  // TODO: Get from active protocol handler
-assign rx_byte_count_int = 32'd0;  // TODO: Implement RX byte counter
-assign tx_byte_count_int = 32'd0;  // TODO: Implement TX byte counter
+//-----------------------------------------------------------------------------
+// Extended Status and Byte Counting
+//-----------------------------------------------------------------------------
+reg [31:0] rx_byte_counter;
+reg [31:0] tx_byte_counter;
+reg        usb_error_reg;
+
+always @(posedge ulpi_clk or negedge rst_n) begin
+    if (!rst_n) begin
+        rx_byte_counter <= 32'd0;
+        tx_byte_counter <= 32'd0;
+        usb_error_reg   <= 1'b0;
+    end else if (bus_reset) begin
+        rx_byte_counter <= 32'd0;
+        tx_byte_counter <= 32'd0;
+        usb_error_reg   <= 1'b0;
+    end else begin
+        // Count received bytes
+        if (utmi_rxvalid && utmi_rxactive)
+            rx_byte_counter <= rx_byte_counter + 1'b1;
+
+        // Count transmitted bytes
+        if (utmi_txvalid && utmi_txready)
+            tx_byte_counter <= tx_byte_counter + 1'b1;
+
+        // Track errors
+        if (utmi_rxerror)
+            usb_error_reg <= 1'b1;
+    end
+end
+
+assign usb_error_int = usb_error_reg;
+assign usb_state_int = {4'b0, hs_enabled, usb_suspended, usb_configured, usb_connected};
+assign protocol_state_int = {5'b0, personality_sel};
+assign rx_byte_count_int = rx_byte_counter;
+assign tx_byte_count_int = tx_byte_counter;
+
 assign usb_error = usb_error_int;
 assign usb_state = usb_state_int;
 assign protocol_state = protocol_state_int;
 assign rx_byte_count = rx_byte_count_int;
 assign tx_byte_count = tx_byte_count_int;
 
-// MSC Configuration Status
-// TODO: Wire from drive_lun_mapper when MSC is integrated
-assign msc_drive_present_int = 4'b0001;  // Default: FDD0 present
-assign msc_media_changed_int = 4'b0000;  // No media changes yet
+// MSC Configuration Status (from drive_lun_mapper input)
+assign msc_drive_present_int = msc_drive_present;
+assign msc_media_changed_int = msc_media_changed;
 assign msc_drive_present_out = msc_drive_present_int;
 assign msc_media_changed_out = msc_media_changed_int;
 
