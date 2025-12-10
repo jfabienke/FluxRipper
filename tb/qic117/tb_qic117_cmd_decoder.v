@@ -37,6 +37,8 @@ module tb_qic117_cmd_decoder;
     wire        cmd_is_motion;
     wire        cmd_is_status;
     wire        cmd_is_config;
+    wire        cmd_is_data;
+    wire        cmd_is_diagnostic;
     wire        cmd_is_valid;
 
     // Specific command flags
@@ -47,17 +49,36 @@ module tb_qic117_cmd_decoder;
     wire        cmd_skip_rev_seg;
     wire        cmd_skip_fwd_file;
     wire        cmd_skip_rev_file;
+    wire        cmd_skip_fwd_ext;
+    wire        cmd_skip_rev_ext;
     wire        cmd_physical_fwd;
     wire        cmd_physical_rev;
     wire        cmd_logical_fwd;
     wire        cmd_logical_rev;
     wire        cmd_pause;
+    wire        cmd_stop;
     wire        cmd_report_status;
     wire        cmd_report_next_bit;
+    wire        cmd_report_vendor;
+    wire        cmd_report_model;
+    wire        cmd_report_rom_ver;
+    wire        cmd_report_drive_cfg;
     wire        cmd_new_cartridge;
+    wire        cmd_eject;
     wire        cmd_select_rate;
     wire        cmd_phantom_select;
     wire        cmd_phantom_deselect;
+    wire        cmd_read_data;
+    wire        cmd_write_data;
+    wire        cmd_seek_track;
+    wire        cmd_seek_segment;
+    wire        cmd_retension;
+    wire        cmd_format_tape;
+    wire        cmd_verify_fwd;
+    wire        cmd_verify_rev;
+    wire        cmd_set_speed;
+    wire        cmd_set_format;
+    wire        cmd_diagnostic;
 
     //=========================================================================
     // DUT Instantiation
@@ -75,6 +96,8 @@ module tb_qic117_cmd_decoder;
         .cmd_is_motion(cmd_is_motion),
         .cmd_is_status(cmd_is_status),
         .cmd_is_config(cmd_is_config),
+        .cmd_is_data(cmd_is_data),
+        .cmd_is_diagnostic(cmd_is_diagnostic),
         .cmd_is_valid(cmd_is_valid),
         .cmd_reset(cmd_reset),
         .cmd_seek_bot(cmd_seek_bot),
@@ -83,17 +106,36 @@ module tb_qic117_cmd_decoder;
         .cmd_skip_rev_seg(cmd_skip_rev_seg),
         .cmd_skip_fwd_file(cmd_skip_fwd_file),
         .cmd_skip_rev_file(cmd_skip_rev_file),
+        .cmd_skip_fwd_ext(cmd_skip_fwd_ext),
+        .cmd_skip_rev_ext(cmd_skip_rev_ext),
         .cmd_physical_fwd(cmd_physical_fwd),
         .cmd_physical_rev(cmd_physical_rev),
         .cmd_logical_fwd(cmd_logical_fwd),
         .cmd_logical_rev(cmd_logical_rev),
         .cmd_pause(cmd_pause),
+        .cmd_stop(cmd_stop),
         .cmd_report_status(cmd_report_status),
         .cmd_report_next_bit(cmd_report_next_bit),
+        .cmd_report_vendor(cmd_report_vendor),
+        .cmd_report_model(cmd_report_model),
+        .cmd_report_rom_ver(cmd_report_rom_ver),
+        .cmd_report_drive_cfg(cmd_report_drive_cfg),
         .cmd_new_cartridge(cmd_new_cartridge),
+        .cmd_eject(cmd_eject),
         .cmd_select_rate(cmd_select_rate),
         .cmd_phantom_select(cmd_phantom_select),
-        .cmd_phantom_deselect(cmd_phantom_deselect)
+        .cmd_phantom_deselect(cmd_phantom_deselect),
+        .cmd_read_data(cmd_read_data),
+        .cmd_write_data(cmd_write_data),
+        .cmd_seek_track(cmd_seek_track),
+        .cmd_seek_segment(cmd_seek_segment),
+        .cmd_retension(cmd_retension),
+        .cmd_format_tape(cmd_format_tape),
+        .cmd_verify_fwd(cmd_verify_fwd),
+        .cmd_verify_rev(cmd_verify_rev),
+        .cmd_set_speed(cmd_set_speed),
+        .cmd_set_format(cmd_set_format),
+        .cmd_diagnostic(cmd_diagnostic)
     );
 
     //=========================================================================
@@ -309,10 +351,131 @@ module tb_qic117_cmd_decoder;
         check_flag(47, cmd_is_config, 1, "cmd_is_config");
         $display("  Command 47 (PHANTOM_DESELECT): cmd_phantom_deselect=%0d", cmd_phantom_deselect);
 
+        send_command(6'd37);
+        check_flag(37, cmd_eject, 1, "cmd_eject");
+        check_flag(37, cmd_is_config, 1, "cmd_is_config");
+        $display("  Command 37 (EJECT): cmd_eject=%0d", cmd_eject);
+
         //=====================================================================
-        // Test 9: Command validity range
+        // Test 9: Data commands (16-17)
         //=====================================================================
         test_num = 9;
+        $display("\n--- Test %0d: Data commands ---", test_num);
+
+        send_command(6'd16);
+        check_flag(16, cmd_read_data, 1, "cmd_read_data");
+        check_flag(16, cmd_is_data, 1, "cmd_is_data");
+        $display("  Command 16 (READ_DATA): cmd_read_data=%0d", cmd_read_data);
+
+        send_command(6'd17);
+        check_flag(17, cmd_write_data, 1, "cmd_write_data");
+        check_flag(17, cmd_is_data, 1, "cmd_is_data");
+        $display("  Command 17 (WRITE_DATA): cmd_write_data=%0d", cmd_write_data);
+
+        //=====================================================================
+        // Test 10: Extended skip commands (14-15)
+        //=====================================================================
+        test_num = 10;
+        $display("\n--- Test %0d: Extended skip commands ---", test_num);
+
+        send_command(6'd14);
+        check_flag(14, cmd_skip_rev_ext, 1, "cmd_skip_rev_ext");
+        check_flag(14, cmd_is_skip, 1, "cmd_is_skip");
+        $display("  Command 14 (SKIP_REV_EXT): cmd_skip_rev_ext=%0d", cmd_skip_rev_ext);
+
+        send_command(6'd15);
+        check_flag(15, cmd_skip_fwd_ext, 1, "cmd_skip_fwd_ext");
+        check_flag(15, cmd_is_skip, 1, "cmd_is_skip");
+        $display("  Command 15 (SKIP_FWD_EXT): cmd_skip_fwd_ext=%0d", cmd_skip_fwd_ext);
+
+        //=====================================================================
+        // Test 11: Seek commands (18-19)
+        //=====================================================================
+        test_num = 11;
+        $display("\n--- Test %0d: Extended seek commands ---", test_num);
+
+        send_command(6'd18);
+        check_flag(18, cmd_seek_track, 1, "cmd_seek_track");
+        check_flag(18, cmd_is_seek, 1, "cmd_is_seek");
+        $display("  Command 18 (SEEK_TRACK): cmd_seek_track=%0d", cmd_seek_track);
+
+        send_command(6'd19);
+        check_flag(19, cmd_seek_segment, 1, "cmd_seek_segment");
+        check_flag(19, cmd_is_seek, 1, "cmd_is_seek");
+        $display("  Command 19 (SEEK_SEGMENT): cmd_seek_segment=%0d", cmd_seek_segment);
+
+        //=====================================================================
+        // Test 12: Tape maintenance commands (23-25)
+        //=====================================================================
+        test_num = 12;
+        $display("\n--- Test %0d: Tape maintenance commands ---", test_num);
+
+        send_command(6'd23);
+        check_flag(23, cmd_stop, 1, "cmd_stop");
+        check_flag(23, cmd_is_motion, 1, "cmd_is_motion");
+        $display("  Command 23 (STOP): cmd_stop=%0d", cmd_stop);
+
+        send_command(6'd24);
+        check_flag(24, cmd_retension, 1, "cmd_retension");
+        check_flag(24, cmd_is_motion, 1, "cmd_is_motion");
+        $display("  Command 24 (RETENSION): cmd_retension=%0d", cmd_retension);
+
+        send_command(6'd25);
+        check_flag(25, cmd_format_tape, 1, "cmd_format_tape");
+        check_flag(25, cmd_is_diagnostic, 1, "cmd_is_diagnostic");
+        $display("  Command 25 (FORMAT_TAPE): cmd_format_tape=%0d", cmd_format_tape);
+
+        //=====================================================================
+        // Test 13: Verify and diagnostic commands (26-27, 48)
+        //=====================================================================
+        test_num = 13;
+        $display("\n--- Test %0d: Verify and diagnostic commands ---", test_num);
+
+        send_command(6'd26);
+        check_flag(26, cmd_verify_fwd, 1, "cmd_verify_fwd");
+        check_flag(26, cmd_is_diagnostic, 1, "cmd_is_diagnostic");
+        $display("  Command 26 (VERIFY_FWD): cmd_verify_fwd=%0d", cmd_verify_fwd);
+
+        send_command(6'd27);
+        check_flag(27, cmd_verify_rev, 1, "cmd_verify_rev");
+        check_flag(27, cmd_is_diagnostic, 1, "cmd_is_diagnostic");
+        $display("  Command 27 (VERIFY_REV): cmd_verify_rev=%0d", cmd_verify_rev);
+
+        send_command(6'd48);
+        check_flag(48, cmd_diagnostic, 1, "cmd_diagnostic");
+        check_flag(48, cmd_is_diagnostic, 1, "cmd_is_diagnostic");
+        $display("  Command 48 (DIAGNOSTIC_1): cmd_diagnostic=%0d", cmd_diagnostic);
+
+        //=====================================================================
+        // Test 14: Extended report commands (38-41)
+        //=====================================================================
+        test_num = 14;
+        $display("\n--- Test %0d: Extended report commands ---", test_num);
+
+        send_command(6'd38);
+        check_flag(38, cmd_report_vendor, 1, "cmd_report_vendor");
+        check_flag(38, cmd_is_status, 1, "cmd_is_status");
+        $display("  Command 38 (REPORT_VENDOR): cmd_report_vendor=%0d", cmd_report_vendor);
+
+        send_command(6'd39);
+        check_flag(39, cmd_report_model, 1, "cmd_report_model");
+        check_flag(39, cmd_is_status, 1, "cmd_is_status");
+        $display("  Command 39 (REPORT_MODEL): cmd_report_model=%0d", cmd_report_model);
+
+        send_command(6'd40);
+        check_flag(40, cmd_report_rom_ver, 1, "cmd_report_rom_ver");
+        check_flag(40, cmd_is_status, 1, "cmd_is_status");
+        $display("  Command 40 (REPORT_ROM_VER): cmd_report_rom_ver=%0d", cmd_report_rom_ver);
+
+        send_command(6'd41);
+        check_flag(41, cmd_report_drive_cfg, 1, "cmd_report_drive_cfg");
+        check_flag(41, cmd_is_status, 1, "cmd_is_status");
+        $display("  Command 41 (REPORT_DRIVE_CFG): cmd_report_drive_cfg=%0d", cmd_report_drive_cfg);
+
+        //=====================================================================
+        // Test 15: Command validity range
+        //=====================================================================
+        test_num = 15;
         $display("\n--- Test %0d: Command validity range ---", test_num);
 
         // Test command 0 (invalid)
@@ -336,9 +499,9 @@ module tb_qic117_cmd_decoder;
         $display("  Command 63: cmd_is_valid=%0d (expected 0)", cmd_is_valid);
 
         //=====================================================================
-        // Test 10: Command strobe is single-cycle
+        // Test 16: Command strobe is single-cycle
         //=====================================================================
-        test_num = 10;
+        test_num = 16;
         $display("\n--- Test %0d: Command strobe pulse width ---", test_num);
 
         begin : check_strobe_width
@@ -365,9 +528,9 @@ module tb_qic117_cmd_decoder;
         end
 
         //=====================================================================
-        // Test 11: Mutual exclusivity of command flags
+        // Test 17: Mutual exclusivity of command flags
         //=====================================================================
-        test_num = 11;
+        test_num = 17;
         $display("\n--- Test %0d: Mutual exclusivity of flags ---", test_num);
 
         // cmd_seek_bot should not trigger skip flags
@@ -385,9 +548,9 @@ module tb_qic117_cmd_decoder;
         $display("  Command 1: only cmd_reset set (no motion/seek/skip)");
 
         //=====================================================================
-        // Test 12: All valid commands 1-48
+        // Test 18: All valid commands 1-48
         //=====================================================================
-        test_num = 12;
+        test_num = 18;
         $display("\n--- Test %0d: All valid commands (1-48) ---", test_num);
 
         for (i = 1; i <= 48; i = i + 1) begin
@@ -404,9 +567,9 @@ module tb_qic117_cmd_decoder;
         $display("  Verified all 48 commands are valid and latch correctly");
 
         //=====================================================================
-        // Test 13: Reset behavior
+        // Test 19: Reset behavior
         //=====================================================================
-        test_num = 13;
+        test_num = 19;
         $display("\n--- Test %0d: Reset clears command_code ---", test_num);
 
         send_command(6'd30);

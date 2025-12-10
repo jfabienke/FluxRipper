@@ -41,6 +41,10 @@ module qic117_status_encoder #(
     input  wire        enable,            // Enable encoder (tape mode active)
     input  wire        send_status,       // Pulse to start sending full status
     input  wire        send_next_bit,     // Pulse to send next bit only
+    input  wire        send_vendor,       // Pulse to send vendor ID
+    input  wire        send_model,        // Pulse to send model ID
+    input  wire        send_rom_ver,      // Pulse to send ROM version
+    input  wire        send_drive_cfg,    // Pulse to send drive configuration
 
     //=========================================================================
     // Status Inputs
@@ -54,6 +58,14 @@ module qic117_status_encoder #(
     input  wire        stat_at_eot,       // At end of tape
 
     //=========================================================================
+    // Drive Identity (for report commands)
+    //=========================================================================
+    input  wire [7:0]  vendor_id,         // Vendor ID (e.g., 0x47 for CMS)
+    input  wire [7:0]  model_id,          // Model ID (drive specific)
+    input  wire [7:0]  rom_version,       // ROM version
+    input  wire [7:0]  drive_config,      // Drive configuration byte
+
+    //=========================================================================
     // Output
     //=========================================================================
     output reg         trk0_out,          // TRK0 output (directly to drive interface)
@@ -63,7 +75,8 @@ module qic117_status_encoder #(
     // Debug
     //=========================================================================
     output wire [3:0]  current_bit,       // Bit currently being sent (0-7)
-    output wire [7:0]  status_word        // Current status word
+    output wire [7:0]  status_word,       // Current status word
+    output wire [2:0]  current_byte       // Byte being sent (for multi-byte responses)
 );
 
     //=========================================================================
@@ -82,7 +95,8 @@ module qic117_status_encoder #(
     localparam GAP_CLKS       = (CLK_FREQ_HZ / 1_000_000) * GAP_US;
     localparam SETUP_CLKS     = (CLK_FREQ_HZ / 1_000_000) * SETUP_US;
 
-    // Timer width
+    // Timer width (safe truncation - values always fit in timer)
+    /* verilator lint_off WIDTHTRUNC */
     localparam TIMER_WIDTH = $clog2(BIT1_LOW_CLKS + 1);
 
     //=========================================================================
@@ -100,11 +114,21 @@ module qic117_status_encoder #(
     // Internal Registers
     //=========================================================================
     reg [7:0]  shift_reg;                 // Status bits to send (MSB first)
-    reg [3:0]  bit_count;                 // Bits remaining to send
+    reg [3:0]  bit_count;                 // Bits remaining to send in current byte
     reg [3:0]  bit_index;                 // Current bit index (for debug)
     reg        send_all;                  // Sending full status vs single bit
+    reg [2:0]  byte_index;                // Current byte index (for multi-byte)
+    reg [2:0]  bytes_total;               // Total bytes to send (1 for status, more for IDs)
+    reg [2:0]  response_type;             // Type of response being sent
 
     reg [TIMER_WIDTH-1:0] timer;          // Timing counter
+
+    // Response types
+    localparam [2:0] RESP_STATUS     = 3'd0;
+    localparam [2:0] RESP_VENDOR     = 3'd1;
+    localparam [2:0] RESP_MODEL      = 3'd2;
+    localparam [2:0] RESP_ROM_VER    = 3'd3;
+    localparam [2:0] RESP_DRIVE_CFG  = 3'd4;
 
     //=========================================================================
     // Status Word Construction
@@ -121,20 +145,39 @@ module qic117_status_encoder #(
     };
 
     assign current_bit = bit_index;
+    assign current_byte = byte_index;
+
+    // Select data byte based on response type
+    function [7:0] get_response_byte;
+        input [2:0] resp_type;
+        begin
+            case (resp_type)
+                RESP_STATUS:    get_response_byte = status_word;
+                RESP_VENDOR:    get_response_byte = vendor_id;
+                RESP_MODEL:     get_response_byte = model_id;
+                RESP_ROM_VER:   get_response_byte = rom_version;
+                RESP_DRIVE_CFG: get_response_byte = drive_config;
+                default:        get_response_byte = status_word;
+            endcase
+        end
+    endfunction
 
     //=========================================================================
     // State Machine
     //=========================================================================
     always @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            state     <= ST_IDLE;
-            shift_reg <= 8'd0;
-            bit_count <= 4'd0;
-            bit_index <= 4'd0;
-            send_all  <= 1'b0;
-            timer     <= {TIMER_WIDTH{1'b0}};
-            trk0_out  <= 1'b1;            // TRK0 idle high
-            busy      <= 1'b0;
+            state         <= ST_IDLE;
+            shift_reg     <= 8'd0;
+            bit_count     <= 4'd0;
+            bit_index     <= 4'd0;
+            byte_index    <= 3'd0;
+            bytes_total   <= 3'd1;
+            response_type <= RESP_STATUS;
+            send_all      <= 1'b0;
+            timer         <= {TIMER_WIDTH{1'b0}};
+            trk0_out      <= 1'b1;            // TRK0 idle high
+            busy          <= 1'b0;
         end else if (!enable) begin
             // Disabled - reset to idle
             state    <= ST_IDLE;
@@ -149,13 +192,64 @@ module qic117_status_encoder #(
 
                     if (send_status) begin
                         // Start sending full 8-bit status
-                        shift_reg <= status_word;
-                        bit_count <= 4'd8;
-                        bit_index <= 4'd0;
-                        send_all  <= 1'b1;
-                        timer     <= SETUP_CLKS;
-                        state     <= ST_SETUP;
-                        busy      <= 1'b1;
+                        shift_reg     <= status_word;
+                        bit_count     <= 4'd8;
+                        bit_index     <= 4'd0;
+                        byte_index    <= 3'd0;
+                        bytes_total   <= 3'd1;
+                        response_type <= RESP_STATUS;
+                        send_all      <= 1'b1;
+                        timer         <= SETUP_CLKS;
+                        state         <= ST_SETUP;
+                        busy          <= 1'b1;
+                    end else if (send_vendor) begin
+                        // Send vendor ID
+                        shift_reg     <= vendor_id;
+                        bit_count     <= 4'd8;
+                        bit_index     <= 4'd0;
+                        byte_index    <= 3'd0;
+                        bytes_total   <= 3'd1;
+                        response_type <= RESP_VENDOR;
+                        send_all      <= 1'b1;
+                        timer         <= SETUP_CLKS;
+                        state         <= ST_SETUP;
+                        busy          <= 1'b1;
+                    end else if (send_model) begin
+                        // Send model ID
+                        shift_reg     <= model_id;
+                        bit_count     <= 4'd8;
+                        bit_index     <= 4'd0;
+                        byte_index    <= 3'd0;
+                        bytes_total   <= 3'd1;
+                        response_type <= RESP_MODEL;
+                        send_all      <= 1'b1;
+                        timer         <= SETUP_CLKS;
+                        state         <= ST_SETUP;
+                        busy          <= 1'b1;
+                    end else if (send_rom_ver) begin
+                        // Send ROM version
+                        shift_reg     <= rom_version;
+                        bit_count     <= 4'd8;
+                        bit_index     <= 4'd0;
+                        byte_index    <= 3'd0;
+                        bytes_total   <= 3'd1;
+                        response_type <= RESP_ROM_VER;
+                        send_all      <= 1'b1;
+                        timer         <= SETUP_CLKS;
+                        state         <= ST_SETUP;
+                        busy          <= 1'b1;
+                    end else if (send_drive_cfg) begin
+                        // Send drive configuration
+                        shift_reg     <= drive_config;
+                        bit_count     <= 4'd8;
+                        bit_index     <= 4'd0;
+                        byte_index    <= 3'd0;
+                        bytes_total   <= 3'd1;
+                        response_type <= RESP_DRIVE_CFG;
+                        send_all      <= 1'b1;
+                        timer         <= SETUP_CLKS;
+                        state         <= ST_SETUP;
+                        busy          <= 1'b1;
                     end else if (send_next_bit && bit_count > 0) begin
                         // Continue sending from where we left off
                         timer    <= SETUP_CLKS;
@@ -239,5 +333,6 @@ module qic117_status_encoder #(
             endcase
         end
     end
+    /* verilator lint_on WIDTHTRUNC */
 
 endmodule

@@ -38,6 +38,8 @@ module qic117_cmd_decoder (
     output wire        cmd_is_motion,
     output wire        cmd_is_status,
     output wire        cmd_is_config,
+    output wire        cmd_is_data,
+    output wire        cmd_is_diagnostic,
     output wire        cmd_is_valid,
 
     // Specific command flags (active high when command matches)
@@ -48,17 +50,36 @@ module qic117_cmd_decoder (
     output wire        cmd_skip_rev_seg,
     output wire        cmd_skip_fwd_file,
     output wire        cmd_skip_rev_file,
+    output wire        cmd_skip_fwd_ext,
+    output wire        cmd_skip_rev_ext,
     output wire        cmd_physical_fwd,
     output wire        cmd_physical_rev,
     output wire        cmd_logical_fwd,
     output wire        cmd_logical_rev,
     output wire        cmd_pause,
+    output wire        cmd_stop,
     output wire        cmd_report_status,
     output wire        cmd_report_next_bit,
+    output wire        cmd_report_vendor,
+    output wire        cmd_report_model,
+    output wire        cmd_report_rom_ver,
+    output wire        cmd_report_drive_cfg,
     output wire        cmd_new_cartridge,
+    output wire        cmd_eject,
     output wire        cmd_select_rate,
     output wire        cmd_phantom_select,
-    output wire        cmd_phantom_deselect
+    output wire        cmd_phantom_deselect,
+    output wire        cmd_read_data,
+    output wire        cmd_write_data,
+    output wire        cmd_seek_track,
+    output wire        cmd_seek_segment,
+    output wire        cmd_retension,
+    output wire        cmd_format_tape,
+    output wire        cmd_verify_fwd,
+    output wire        cmd_verify_rev,
+    output wire        cmd_set_speed,
+    output wire        cmd_set_format,
+    output wire        cmd_diagnostic
 );
 
     //=========================================================================
@@ -183,6 +204,8 @@ module qic117_cmd_decoder (
     assign cmd_skip_rev_seg     = (command_code == QIC_SKIP_REV_SEG);
     assign cmd_skip_fwd_file    = (command_code == QIC_SKIP_FWD_FILE);
     assign cmd_skip_rev_file    = (command_code == QIC_SKIP_REV_FILE);
+    assign cmd_skip_fwd_ext     = (command_code == QIC_SKIP_FWD_EXT);
+    assign cmd_skip_rev_ext     = (command_code == QIC_SKIP_REV_EXT);
 
     // Physical Motion
     assign cmd_physical_fwd     = (command_code == QIC_PHYSICAL_FWD);
@@ -195,16 +218,41 @@ module qic117_cmd_decoder (
     // Control
     assign cmd_pause            = (command_code == QIC_PAUSE) ||
                                   (command_code == QIC_MICRO_STEP_PAUSE);
+    assign cmd_stop             = (command_code == QIC_STOP_TAPE);
 
-    // Status
+    // Status/Report Commands
     assign cmd_report_status    = (command_code == QIC_REPORT_STATUS);
     assign cmd_report_next_bit  = (command_code == QIC_REPORT_NEXT_BIT);
+    assign cmd_report_vendor    = (command_code == QIC_REPORT_VENDOR);
+    assign cmd_report_model     = (command_code == QIC_REPORT_MODEL);
+    assign cmd_report_rom_ver   = (command_code == QIC_REPORT_ROM_VER);
+    assign cmd_report_drive_cfg = (command_code == QIC_REPORT_DRIVE_CFG);
 
     // Configuration
     assign cmd_new_cartridge    = (command_code == QIC_NEW_CARTRIDGE);
+    assign cmd_eject            = (command_code == QIC_EJECT);
     assign cmd_select_rate      = (command_code == QIC_SELECT_RATE);
     assign cmd_phantom_select   = (command_code == QIC_PHANTOM_SELECT);
     assign cmd_phantom_deselect = (command_code == QIC_PHANTOM_DESELECT);
+    assign cmd_set_speed        = (command_code == QIC_SET_SPEED);
+    assign cmd_set_format       = (command_code == QIC_SET_FORMAT);
+
+    // Read/Write Commands
+    assign cmd_read_data        = (command_code == QIC_READ_DATA);
+    assign cmd_write_data       = (command_code == QIC_WRITE_DATA);
+
+    // Seek Commands
+    assign cmd_seek_track       = (command_code == QIC_SEEK_TRACK);
+    assign cmd_seek_segment     = (command_code == QIC_SEEK_SEGMENT);
+
+    // Tape Maintenance
+    assign cmd_retension        = (command_code == QIC_RETENSION);
+    assign cmd_format_tape      = (command_code == QIC_FORMAT_TAPE);
+
+    // Diagnostic/Verify Commands
+    assign cmd_verify_fwd       = (command_code == QIC_VERIFY_FWD);
+    assign cmd_verify_rev       = (command_code == QIC_VERIFY_REV);
+    assign cmd_diagnostic       = (command_code == QIC_DIAGNOSTIC_1);
 
     //=========================================================================
     // Command Type Classification
@@ -213,29 +261,30 @@ module qic117_cmd_decoder (
     assign cmd_is_reset = cmd_reset;
 
     assign cmd_is_seek = cmd_seek_bot || cmd_seek_eot ||
-                         (command_code == QIC_SEEK_TRACK) ||
-                         (command_code == QIC_SEEK_SEGMENT);
+                         cmd_seek_track || cmd_seek_segment;
 
     assign cmd_is_skip = cmd_skip_fwd_seg || cmd_skip_rev_seg ||
                          cmd_skip_fwd_file || cmd_skip_rev_file ||
-                         (command_code == QIC_SKIP_FWD_EXT) ||
-                         (command_code == QIC_SKIP_REV_EXT);
+                         cmd_skip_fwd_ext || cmd_skip_rev_ext;
 
     assign cmd_is_motion = cmd_physical_fwd || cmd_physical_rev ||
                            cmd_logical_fwd || cmd_logical_rev ||
-                           cmd_pause ||
-                           (command_code == QIC_STOP_TAPE) ||
-                           (command_code == QIC_RETENSION);
+                           cmd_pause || cmd_stop ||
+                           cmd_retension || cmd_read_data || cmd_write_data;
 
     assign cmd_is_status = cmd_report_status || cmd_report_next_bit ||
-                           (command_code == QIC_REPORT_VENDOR) ||
-                           (command_code == QIC_REPORT_MODEL) ||
-                           (command_code == QIC_REPORT_ROM_VER) ||
-                           (command_code == QIC_REPORT_DRIVE_CFG);
+                           cmd_report_vendor || cmd_report_model ||
+                           cmd_report_rom_ver || cmd_report_drive_cfg;
 
-    assign cmd_is_config = cmd_new_cartridge || cmd_select_rate ||
+    assign cmd_is_config = cmd_new_cartridge || cmd_eject ||
+                           cmd_select_rate ||
                            cmd_phantom_select || cmd_phantom_deselect ||
-                           (command_code == QIC_SET_SPEED) ||
-                           (command_code == QIC_SET_FORMAT);
+                           cmd_set_speed || cmd_set_format;
+
+    // Data and diagnostic command classifications
+    assign cmd_is_data = cmd_read_data || cmd_write_data;
+
+    assign cmd_is_diagnostic = cmd_verify_fwd || cmd_verify_rev ||
+                               cmd_format_tape || cmd_diagnostic;
 
 endmodule

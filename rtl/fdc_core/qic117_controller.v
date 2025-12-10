@@ -202,16 +202,28 @@ module qic117_controller #(
     wire        streamer_block_start;
     wire        streamer_block_complete;
     wire [4:0]  streamer_block_in_segment;
+    wire [7:0]  streamer_block_header;
     wire        streamer_segment_start;
     wire        streamer_segment_complete;
     wire [15:0] streamer_segment_count;
+    wire        streamer_irg_detected;
     wire [7:0]  streamer_data_byte;
     wire        streamer_data_valid;
     wire        streamer_data_is_header;
+    wire        streamer_data_is_ecc;
+    wire [23:0] streamer_ecc_bytes;
+    wire        streamer_ecc_valid;
+    wire        streamer_is_data_block;
     wire        streamer_file_mark;
+    wire        streamer_is_eod_mark;
+    wire        streamer_is_bad_block;
     wire        streamer_sync_lost;
     wire        streamer_overrun;
+    wire        streamer_preamble_error;
     wire [15:0] streamer_error_count;
+    wire [15:0] streamer_good_block_count;
+    wire [2:0]  streamer_state;
+    wire [7:0]  streamer_preamble_count;
 
     //=========================================================================
     // Drive Detection Signals
@@ -344,6 +356,25 @@ module qic117_controller #(
         .timeout_pending(timeout_pending)
     );
 
+    // Extended command decoder signals (used by status encoder and FSM)
+    wire cmd_skip_fwd_ext;
+    wire cmd_skip_rev_ext;
+    wire cmd_stop;
+    wire cmd_read_data;
+    wire cmd_write_data;
+    wire cmd_seek_track;
+    wire cmd_seek_segment;
+    wire cmd_retension;
+    wire cmd_format_tape;
+    wire cmd_verify_fwd;
+    wire cmd_verify_rev;
+    wire cmd_eject;
+    wire cmd_set_speed;
+    wire cmd_set_format;
+    wire cmd_diagnostic;
+    wire cmd_is_data;
+    wire cmd_is_diagnostic;
+
     // Command decoder
     qic117_cmd_decoder u_cmd_decoder (
         .clk                (clk),
@@ -376,7 +407,29 @@ module qic117_controller #(
         .cmd_new_cartridge  (cmd_new_cartridge),
         .cmd_select_rate    (cmd_select_rate),
         .cmd_phantom_select (cmd_phantom_select),
-        .cmd_phantom_deselect(cmd_phantom_deselect)
+        .cmd_phantom_deselect(cmd_phantom_deselect),
+        // Extended commands (Phase 4)
+        .cmd_skip_fwd_ext   (cmd_skip_fwd_ext),
+        .cmd_skip_rev_ext   (cmd_skip_rev_ext),
+        .cmd_stop           (cmd_stop),
+        .cmd_read_data      (cmd_read_data),
+        .cmd_write_data     (cmd_write_data),
+        .cmd_seek_track     (cmd_seek_track),
+        .cmd_seek_segment   (cmd_seek_segment),
+        .cmd_retension      (cmd_retension),
+        .cmd_format_tape    (cmd_format_tape),
+        .cmd_verify_fwd     (cmd_verify_fwd),
+        .cmd_verify_rev     (cmd_verify_rev),
+        .cmd_eject          (cmd_eject),
+        .cmd_report_vendor  (cmd_report_vendor),
+        .cmd_report_model   (cmd_report_model),
+        .cmd_report_rom_ver (cmd_report_rom_ver),
+        .cmd_report_drive_cfg(cmd_report_drive_cfg),
+        .cmd_set_speed      (cmd_set_speed),
+        .cmd_set_format     (cmd_set_format),
+        .cmd_diagnostic     (cmd_diagnostic),
+        .cmd_is_data        (cmd_is_data),
+        .cmd_is_diagnostic  (cmd_is_diagnostic)
     );
 
     //=========================================================================
@@ -412,6 +465,14 @@ module qic117_controller #(
     //=========================================================================
     // Status Encoder
     //=========================================================================
+
+    // Extended report command signals from decoder
+    wire cmd_report_vendor;
+    wire cmd_report_model;
+    wire cmd_report_rom_ver;
+    wire cmd_report_drive_cfg;
+    wire [2:0] status_current_byte;
+
     qic117_status_encoder #(
         .CLK_FREQ_HZ (CLK_FREQ_HZ)
     ) u_status_encoder (
@@ -420,6 +481,10 @@ module qic117_controller #(
         .enable         (tape_mode_en),
         .send_status    (cmd_strobe && cmd_report_status),
         .send_next_bit  (cmd_strobe && cmd_report_next_bit),
+        .send_vendor    (cmd_strobe && cmd_report_vendor),
+        .send_model     (cmd_strobe && cmd_report_model),
+        .send_rom_ver   (cmd_strobe && cmd_report_rom_ver),
+        .send_drive_cfg (cmd_strobe && cmd_report_drive_cfg),
         .stat_ready     (ready_reg),
         .stat_error     (error_reg),
         .stat_cartridge (tape_cartridge_in),
@@ -427,10 +492,16 @@ module qic117_controller #(
         .stat_new_cart  (new_cartridge_reg),
         .stat_at_bot    (fsm_at_bot),
         .stat_at_eot    (fsm_at_eot),
+        // Drive identity from detection results
+        .vendor_id      (detect_vendor_id),
+        .model_id       (detect_model_id),
+        .rom_version    (detect_rom_version),
+        .drive_config   (detect_drive_config),
         .trk0_out       (status_trk0),
         .busy           (status_busy),
         .current_bit    (status_current_bit),
-        .status_word    (status_word)
+        .status_word    (status_word),
+        .current_byte   (status_current_byte)
     );
 
     //=========================================================================
@@ -441,27 +512,49 @@ module qic117_controller #(
     ) u_data_streamer (
         .clk              (clk),
         .reset_n          (reset_n),
+        // Control
         .enable           (tape_mode_en),
         .streaming        (fsm_tape_moving),
         .direction        (fsm_direction),
+        .clear_counters   (cmd_strobe && cmd_reset),
+        // MFM data interface
         .mfm_data         (mfm_data_in),
         .mfm_clock        (mfm_clock),
         .dpll_locked      (dpll_locked),
+        // Block detection outputs
         .block_sync       (streamer_block_sync),
         .byte_in_block    (streamer_byte_in_block),
         .block_start      (streamer_block_start),
         .block_complete   (streamer_block_complete),
         .block_in_segment (streamer_block_in_segment),
+        .block_header     (streamer_block_header),
+        // Segment tracking
         .segment_start    (streamer_segment_start),
         .segment_complete (streamer_segment_complete),
         .segment_count    (streamer_segment_count),
+        .irg_detected     (streamer_irg_detected),
+        // Data output
         .data_byte        (streamer_data_byte),
         .data_valid       (streamer_data_valid),
         .data_is_header   (streamer_data_is_header),
-        .file_mark_detect (streamer_file_mark),
+        .data_is_ecc      (streamer_data_is_ecc),
+        // ECC output
+        .ecc_bytes        (streamer_ecc_bytes),
+        .ecc_valid        (streamer_ecc_valid),
+        // Block type detection
+        .is_data_block    (streamer_is_data_block),
+        .is_file_mark     (streamer_file_mark),
+        .is_eod_mark      (streamer_is_eod_mark),
+        .is_bad_block     (streamer_is_bad_block),
+        // Error detection
         .sync_lost        (streamer_sync_lost),
         .overrun_error    (streamer_overrun),
-        .error_count      (streamer_error_count)
+        .preamble_error   (streamer_preamble_error),
+        .error_count      (streamer_error_count),
+        .good_block_count (streamer_good_block_count),
+        // Debug
+        .state_out        (streamer_state),
+        .preamble_count   (streamer_preamble_count)
     );
 
     //=========================================================================
@@ -934,10 +1027,8 @@ module qic117_controller #(
     // Direction output - from FSM
     assign tape_direction = fsm_direction;
 
-    // Motor control - from FSM
-    always @(*) begin
-        tape_motor_on = fsm_motor_on;
-    end
+    // Motor control - driven by state machine in main always block above
+    // (tape_motor_on is already assigned in the ST_* cases)
 
     // Data passthrough - from streamer
     assign tape_wdata = 1'b0;  // TODO: Connect to write path

@@ -73,21 +73,32 @@ module qic117_tape_fsm #(
 );
 
     //=========================================================================
-    // QIC-117 Command Codes (subset relevant to position control)
+    // QIC-117 Command Codes (all position/motion related)
     //=========================================================================
     localparam [5:0] CMD_RESET           = 6'd1;
+    localparam [5:0] CMD_PAUSE           = 6'd6;   // Pause motion
     localparam [5:0] CMD_SEEK_BOT        = 6'd8;   // Seek to BOT
     localparam [5:0] CMD_SEEK_EOT        = 6'd9;   // Seek to EOT
     localparam [5:0] CMD_SKIP_REV_SEG    = 6'd10;  // Skip 1 segment reverse
     localparam [5:0] CMD_SKIP_REV_FILE   = 6'd11;  // Skip to previous file mark
     localparam [5:0] CMD_SKIP_FWD_SEG    = 6'd12;  // Skip 1 segment forward
     localparam [5:0] CMD_SKIP_FWD_FILE   = 6'd13;  // Skip to next file mark
+    localparam [5:0] CMD_SKIP_REV_EXT    = 6'd14;  // Skip N segments reverse
+    localparam [5:0] CMD_SKIP_FWD_EXT    = 6'd15;  // Skip N segments forward
+    localparam [5:0] CMD_READ_DATA       = 6'd16;  // Start reading data
+    localparam [5:0] CMD_WRITE_DATA      = 6'd17;  // Start writing data
+    localparam [5:0] CMD_SEEK_TRACK      = 6'd18;  // Seek to track N
+    localparam [5:0] CMD_SEEK_SEGMENT    = 6'd19;  // Seek to segment N
     localparam [5:0] CMD_LOGICAL_FWD     = 6'd21;  // Logical forward
     localparam [5:0] CMD_LOGICAL_REV     = 6'd22;  // Logical reverse
     localparam [5:0] CMD_STOP            = 6'd23;  // Stop tape
+    localparam [5:0] CMD_RETENSION       = 6'd24;  // Retension tape
+    localparam [5:0] CMD_FORMAT          = 6'd25;  // Format tape (low-level)
+    localparam [5:0] CMD_VERIFY_FWD      = 6'd26;  // Verify forward
+    localparam [5:0] CMD_VERIFY_REV      = 6'd27;  // Verify reverse
     localparam [5:0] CMD_PHYSICAL_FWD    = 6'd30;  // Physical forward
     localparam [5:0] CMD_PHYSICAL_REV    = 6'd31;  // Physical reverse
-    localparam [5:0] CMD_PAUSE           = 6'd6;   // Pause motion
+    localparam [5:0] CMD_EJECT           = 6'd37;  // Eject cartridge
 
     //=========================================================================
     // Timing Constants
@@ -100,9 +111,11 @@ module qic117_tape_fsm #(
     localparam TRACK_CHANGE    = CLK_FREQ_HZ;           // 1 second
     localparam MOTOR_SPINUP    = CLK_FREQ_HZ / 2;       // 500ms motor spinup
     localparam STOP_TIME       = CLK_FREQ_HZ / 4;       // 250ms to stop
+    localparam RETENSION_TIME  = CLK_FREQ_HZ * 120;     // 2 minutes for full retension
+    localparam EJECT_TIME      = CLK_FREQ_HZ * 2;       // 2 seconds for eject
 
-    // Timer width (needs to hold 30 seconds at 200MHz)
-    localparam TIMER_WIDTH = 33;  // ceil(log2(30 * 200M))
+    // Timer width (needs to hold 120 seconds at 200MHz for retension)
+    localparam TIMER_WIDTH = 35;  // ceil(log2(120 * 200M))
 
     //=========================================================================
     // State Machine States
@@ -120,6 +133,9 @@ module qic117_tape_fsm #(
     localparam [3:0] ST_STOPPING      = 4'd10;
     localparam [3:0] ST_TRACK_CHANGE  = 4'd11;
     localparam [3:0] ST_ERROR         = 4'd12;
+    localparam [3:0] ST_RETENSION_FWD = 4'd13;  // Retension forward pass
+    localparam [3:0] ST_RETENSION_REV = 4'd14;  // Retension reverse pass
+    localparam [3:0] ST_EJECTING      = 4'd15;  // Ejecting cartridge
 
     reg [3:0] state;
     reg [3:0] next_state_after_spinup;
@@ -264,6 +280,67 @@ module qic117_tape_fsm #(
                                 timer    <= MOTOR_SPINUP;
                                 next_state_after_spinup <= ST_STREAMING_REV;
                                 state    <= ST_MOTOR_SPINUP;
+                            end
+
+                            CMD_READ_DATA: begin
+                                // Read data - same as logical forward but read mode
+                                motor_on <= 1'b1;
+                                timer    <= MOTOR_SPINUP;
+                                next_state_after_spinup <= ST_STREAMING_FWD;
+                                state    <= ST_MOTOR_SPINUP;
+                            end
+
+                            CMD_WRITE_DATA: begin
+                                // Write data - same as logical forward but write mode
+                                motor_on <= 1'b1;
+                                timer    <= MOTOR_SPINUP;
+                                next_state_after_spinup <= ST_STREAMING_FWD;
+                                state    <= ST_MOTOR_SPINUP;
+                            end
+
+                            CMD_VERIFY_FWD: begin
+                                // Verify forward - read and verify, same as streaming
+                                motor_on <= 1'b1;
+                                timer    <= MOTOR_SPINUP;
+                                next_state_after_spinup <= ST_STREAMING_FWD;
+                                state    <= ST_MOTOR_SPINUP;
+                            end
+
+                            CMD_VERIFY_REV: begin
+                                // Verify reverse
+                                motor_on <= 1'b1;
+                                timer    <= MOTOR_SPINUP;
+                                next_state_after_spinup <= ST_STREAMING_REV;
+                                state    <= ST_MOTOR_SPINUP;
+                            end
+
+                            CMD_RETENSION: begin
+                                // Retension - forward to EOT, then back to BOT
+                                motor_on <= 1'b1;
+                                timer    <= MOTOR_SPINUP;
+                                next_state_after_spinup <= ST_RETENSION_FWD;
+                                state    <= ST_MOTOR_SPINUP;
+                            end
+
+                            CMD_EJECT: begin
+                                // Eject - rewind to BOT first, then eject
+                                if (!at_bot) begin
+                                    motor_on <= 1'b1;
+                                    timer    <= MOTOR_SPINUP;
+                                    next_state_after_spinup <= ST_SEEK_BOT;
+                                    state    <= ST_MOTOR_SPINUP;
+                                    // Note: after ST_SEEK_BOT, we'll need to eject
+                                    // For now, just rewind - eject handled separately
+                                end else begin
+                                    motor_on <= 1'b1;
+                                    timer    <= EJECT_TIME;
+                                    state    <= ST_EJECTING;
+                                end
+                            end
+
+                            CMD_STOP: begin
+                                // Stop - already idle, just acknowledge
+                                command_done <= 1'b1;
                             end
 
                             default: begin
@@ -591,6 +668,82 @@ module qic117_tape_fsm #(
 
                     // Wait for reset command
                     if (command_valid && command == CMD_RESET) begin
+                        state <= ST_IDLE;
+                    end
+                end
+
+                //-------------------------------------------------------------
+                ST_RETENSION_FWD: begin
+                    // Retension forward pass - fast forward to EOT
+                    motor_on    <= 1'b1;
+                    tape_moving <= 1'b1;
+                    direction   <= 1'b0;  // Forward
+                    motion_mode <= 2'd1;  // Seek mode (fast)
+                    at_bot      <= 1'b0;
+
+                    // Simulate fast-forward
+                    if (index_rising && segment < MAX_SEGMENTS) begin
+                        segment <= segment + 1'b1;
+                    end
+
+                    // Check if at EOT
+                    if (segment >= MAX_SEGMENTS) begin
+                        at_eot    <= 1'b1;
+                        direction <= 1'b1;  // Switch to reverse
+                        state     <= ST_RETENSION_REV;
+                    end
+
+                    // Handle abort
+                    if (command_valid && (command == CMD_PAUSE || command == CMD_STOP)) begin
+                        timer <= STOP_TIME;
+                        state <= ST_STOPPING;
+                    end
+                end
+
+                //-------------------------------------------------------------
+                ST_RETENSION_REV: begin
+                    // Retension reverse pass - rewind to BOT
+                    motor_on    <= 1'b1;
+                    tape_moving <= 1'b1;
+                    direction   <= 1'b1;  // Reverse
+                    motion_mode <= 2'd1;  // Seek mode (fast)
+                    at_eot      <= 1'b0;
+
+                    // Simulate rewind
+                    if (index_rising && segment > 0) begin
+                        segment <= segment - 1'b1;
+                    end
+
+                    // Check if at BOT - retension complete
+                    if (segment == 0) begin
+                        at_bot       <= 1'b1;
+                        track        <= 5'd0;
+                        timer        <= STOP_TIME;
+                        state        <= ST_STOPPING;
+                    end
+
+                    // Handle abort
+                    if (command_valid && (command == CMD_PAUSE || command == CMD_STOP)) begin
+                        timer <= STOP_TIME;
+                        state <= ST_STOPPING;
+                    end
+                end
+
+                //-------------------------------------------------------------
+                ST_EJECTING: begin
+                    // Ejecting cartridge
+                    motor_on    <= 1'b1;
+                    tape_moving <= 1'b0;
+                    motion_mode <= 2'd0;
+
+                    if (timer > 0) begin
+                        timer <= timer - 1'b1;
+                    end else begin
+                        // Eject complete
+                        motor_on     <= 1'b0;
+                        command_done <= 1'b1;
+                        // Note: Real hardware would need cartridge detection
+                        // to verify eject completed
                         state <= ST_IDLE;
                     end
                 end
